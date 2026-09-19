@@ -1,0 +1,13 @@
+
+llm:
+  base-url: http://127.0.0.1:1234/v1
+
+  #本地版本，此为占位符
+  api-key: "xxx"
+
+  model-name: deepseek-r1
+
+# —— 服务端口（可选）——
+# 不写时默认为 8080；如需修改可取消注释并设置端口。
+# server:
+#   port: 8080

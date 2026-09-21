@@ -1,0 +1,3 @@
+-- RagAgent 初始化数据（可选，默认无需预置）
+-- 文档与分块均由应用接口在运行时写入（见 DocumentRepository / IngestionService），
+-- 仅当需要手工造测试数据时，在下方添加 INSERT 语句。

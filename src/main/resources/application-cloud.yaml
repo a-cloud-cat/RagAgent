@@ -1,0 +1,8 @@
+# —— 云端环境：DeepSeek 官方（激活方式：--spring.profiles.active=cloud）——
+# key 从环境变量注入，设置（PowerShell，只需执行一次）：
+#   setx DEEPSEEK_API_KEY "你的DeepSeek key"
+# 申请地址：https://platform.deepseek.com/api_keys
+llm:
+  base-url: https://api.deepseek.com/v1
+  api-key: ${DEEPSEEK_API_KEY:}
+  model-name: deepseek-v4-pro

@@ -37,3 +37,9 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### 项目规划（本地维护，不提交）###
+/ROADMAP.md
+
+### JVM 崩溃日志（HotSpot fatal error，* 为进程 pid，可匹配不同序号）###
+hs_err_pid*.log

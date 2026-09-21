@@ -1,0 +1,17 @@
+# RagAgent 本地依赖：PostgreSQL + pgvector
+# 启动：docker compose up -d
+# 停止：docker compose down
+services:
+  pgvector:
+    image: pgvector/pgvector:pg17
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: rag_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

@@ -1,0 +1,6 @@
+# —— 本地环境：LM Studio（默认激活）——
+# 前置：LM Studio 已启动 Local Server，且加载的模型 id 与下面 model-name 完全一致。
+llm:
+  base-url: http://127.0.0.1:1234/v1
+  api-key: "xxx"        # 本地服务不校验，占位即可
+  model-name: deepseek/deepseek-r1-0528-qwen3-8b

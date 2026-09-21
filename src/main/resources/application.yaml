@@ -1,13 +1,27 @@
-
-llm:
-  base-url: http://127.0.0.1:1234/v1
-
-  #本地版本，此为占位符
-  api-key: "xxx"
-
-  model-name: deepseek-r1
-
 # —— 服务端口（可选）——
-# 不写时默认为 8080；如需修改可取消注释并设置端口。
 # server:
 #   port: 8080
+
+# —— 环境切换 ——
+# 当前默认 cloud（云端 DeepSeek）；切回本地 LM Studio 时把下面改回 local，
+# 或在 IDEA 运行配置的 Active profiles 里填 local/cloud 临时覆盖。
+spring:
+  profiles:
+    active: cloud
+  # —— PostgreSQL + pgvector（对应正在运行的 rag_pgvector 容器）——
+  datasource:
+    url: jdbc:postgresql://localhost:5432/rag_db
+    username: postgres
+    password: "123456"
+    driver-class-name: org.postgresql.Driver
+
+# —— 向量化模型（阿里云百炼，两个环境共用，key 从环境变量注入）——
+# 设置（PowerShell，只需执行一次）：setx DASHSCOPE_API_KEY "你的百炼key"
+rag:
+  embedding:
+    base-url: https://dashscope.aliyuncs.com
+    api-key: ${DASHSCOPE_API_KEY:}
+    model: text-embedding-v4
+    dimension: 1536       # 已随请求传给百炼；text-embedding-v4 默认 1024，不显式传则维度不符
+  retrieval:
+    top-k: 3              # 每次提问召回的最相似分块数

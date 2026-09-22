@@ -14,6 +14,7 @@
 | PostgreSQL + pgvector | pg17 | 文档/分块存储与向量余弦相似度检索（HNSW 索引） |
 | 阿里云百炼 text-embedding-v4 | - | 文本向量化（1536 维，OpenAI 兼容协议） |
 | Apache Tika | 3.2.2 | PDF/HTML 等文档解析为纯文本 |
+| JUnit 5 / AssertJ / MockWebServer | Boot 3.2.0 管理 | 单元测试（test scope，不进生产包） |
 | springdoc-openapi | 2.3.0 | 接口文档，启动后访问 `/swagger-ui.html` |
 | Maven | 3.6+ | 构建（也可用 IDEA 内置 Maven） |
 | LM Studio | 任意 | 本地 OpenAI 兼容推理服务，默认端口 1234（local profile） |
@@ -91,6 +92,11 @@ src/main/resources/
 │   ├── schema_pg.sql           # 建表 + pgvector 扩展 + HNSW 索引
 │   └── init_data_pg.sql        # 可选种子数据（默认无需预置）
 └── static/index.html           # 前端页面（自动托管）
+src/test/
+├── java/.../service/TextChunkerTest.java        # 切块边界（空/短/临界/超长/重叠）
+├── java/.../embedding/OpenAiEmbeddingClientTest.java  # MockWebServer 桩：请求体与条数/维度校验
+├── java/.../parser/TikaDocumentParserTest.java  # HTML 夹具：正文提取与标签剥离
+└── resources/parser/sample.html                 # 解析器测试夹具
 docker-compose.yml              # 本地 pgvector 容器
 ```
 
@@ -186,6 +192,7 @@ curl -N -X POST http://localhost:8080/chat -H "Content-Type: application/json" -
 ```bash
 docker compose up -d              # 启动 pgvector
 mvn compile                       # 编译
+mvn test                          # 运行单元测试（离线、无需 Docker，共 11 个用例）
 mvn spring-boot:run               # 运行
 mvn clean package -DskipTests     # 打包
 ```

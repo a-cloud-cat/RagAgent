@@ -17,6 +17,10 @@
 
     <properties>
         <java.version>17</java.version>
+        <tika.version>3.2.2</tika.version>
+        <!-- 覆盖 Boot 3.2.0 BOM 默认的 3.13.0：Tika 传递的 commons-compress 1.28 运行时需调用
+             lang3 3.18 新增的 SystemProperties.getUserName，旧版会抛 NoSuchMethodError -->
+        <commons-lang3.version>3.18.0</commons-lang3.version>
     </properties>
 
     <dependencies>
@@ -45,6 +49,18 @@
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>2.3.0</version>
+        </dependency>
+
+        <!-- 文档解析：tika-core 提供门面接口，standard-package 提供 PDF/HTML 等格式的具体解析实现 -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+            <version>${tika.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers-standard-package</artifactId>
+            <version>${tika.version}</version>
         </dependency>
     </dependencies>
 

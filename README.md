@@ -1,6 +1,6 @@
 # RagAgent
 
-基于 **Spring Boot** 的 RAG（检索增强生成）流式对话应用：上传文本文档后自动切块、向量化并存入 pgvector；提问时先检索最相似的知识分块拼入提示词，再经 `WebClient` 调用大模型（OpenAI 兼容接口），通过 SSE 逐字返回回复。
+基于 **Spring Boot** 的 RAG（检索增强生成）流式对话应用：上传 `.txt` / `.pdf` / `.html` 文档后自动解析为纯文本、切块、向量化并存入 pgvector；提问时先检索最相似的知识分块拼入提示词，再经 `WebClient` 调用大模型（OpenAI 兼容接口），通过 SSE 逐字返回回复。
 
 ## 技术栈
 
@@ -13,6 +13,7 @@
 | spring-boot-starter-jdbc | 3.2.0 | JdbcTemplate + Hikari 连接池访问 PostgreSQL |
 | PostgreSQL + pgvector | pg17 | 文档/分块存储与向量余弦相似度检索（HNSW 索引） |
 | 阿里云百炼 text-embedding-v4 | - | 文本向量化（1536 维，OpenAI 兼容协议） |
+| Apache Tika | 3.2.2 | PDF/HTML 等文档解析为纯文本 |
 | springdoc-openapi | 2.3.0 | 接口文档，启动后访问 `/swagger-ui.html` |
 | Maven | 3.6+ | 构建（也可用 IDEA 内置 Maven） |
 | LM Studio | 任意 | 本地 OpenAI 兼容推理服务，默认端口 1234（local profile） |
@@ -22,7 +23,9 @@
 **文档入库：**
 
 ```
-POST /documents（multipart，.txt）
+POST /documents（multipart，.txt/.pdf/.html/.htm）
+   ▼
+txt 按 UTF-8 直读；PDF/HTML 经 DocumentParser（Apache Tika）提取纯文本
    ▼
 IngestionService：建文档记录(PENDING)
    ▼
@@ -60,12 +63,15 @@ src/main/java/com/example/rag/
 │   └── RetrievalProperties.java # rag.retrieval.* 配置绑定
 ├── controller/
 │   ├── ChatController.java      # POST /chat（SSE）
-│   ├── DocumentController.java  # POST /documents（上传 .txt 入库）
+│   ├── DocumentController.java  # POST /documents（上传文档入库）
 │   └── GlobalExceptionHandler.java  # 统一异常：400 / 500
 ├── embedding/
 │   ├── EmbeddingClient.java         # 向量化接口
 │   ├── OpenAiEmbeddingClient.java   # 百炼实现（维度/条数校验、分批）
 │   └── dto/                         # Embedding 请求/响应 DTO
+├── parser/
+│   ├── DocumentParser.java       # 文档解析接口：二进制流 → 纯文本
+│   └── TikaDocumentParser.java   # Tika 实现（PDF/HTML，异常包为 IllegalStateException）
 ├── service/
 │   ├── ChatService.java        # 检索增强 + 调用大模型并转发 SSE
 │   ├── IngestionService.java   # 入库编排：切块 → 向量化 → 落库
@@ -109,10 +115,12 @@ docker-compose.yml              # 本地 pgvector 容器
 
 4. **启动后端**：IDEA 运行 `RagApplication.java`，或 `mvn spring-boot:run`。
 
-5. **入库文档**：通过 Swagger UI（`http://localhost:8080/swagger-ui.html`）或 curl 上传 UTF-8 编码的 `.txt`：
+5. **入库文档**：通过 Swagger UI（`http://localhost:8080/swagger-ui.html`）或 curl 上传文档，支持 UTF-8 编码的 `.txt` 以及 `.pdf` / `.html` / `.htm`：
 
    ```bash
-   curl -F "file=@你的文档.txt" http://localhost:8080/documents
+   curl -F "file=@你的文档.txt"  http://localhost:8080/documents
+   curl -F "file=@你的文档.pdf"  http://localhost:8080/documents
+   curl -F "file=@你的文档.html" http://localhost:8080/documents
    ```
 
 6. **开始提问**：浏览器访问 `http://localhost:8080/`，Enter 发送（Shift+Enter 换行）。
@@ -146,10 +154,10 @@ rag:
 
 **`POST /documents`**，`Content-Type: multipart/form-data`，文件参数名 `file`
 
-仅支持 UTF-8 的 `.txt`。成功返回：`{"id":1,"name":"xxx.txt","status":"INGESTED"}`；空文件/非 txt 返回 400。
+支持 `.txt`（UTF-8 直读）、`.pdf` / `.html` / `.htm`（Tika 提取纯文本）。成功返回：`{"id":1,"name":"xxx.pdf","status":"INGESTED"}`；空文件/不支持的后缀返回 400。
 
 ```bash
-curl -F "file=@你的文档.txt" http://localhost:8080/documents
+curl -F "file=@你的文档.pdf" http://localhost:8080/documents
 ```
 
 **`POST /chat`**，`Content-Type: application/json`

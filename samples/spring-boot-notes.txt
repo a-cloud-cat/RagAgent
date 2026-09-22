@@ -1,0 +1,22 @@
+Spring Boot 学习笔记（RagAgent 样本文档）
+
+一、什么是 Spring Boot
+Spring Boot 是基于 Spring 框架的快速开发脚手架，核心目标是"约定优于配置"。它通过自动配置（Auto-Configuration）、起步依赖（Starter）和内嵌 Web 容器三件套，让开发者不用再写大量 XML 配置，也不用单独部署 WAR 包到 Tomcat，main 方法一跑就能启动一个完整的 Web 应用。
+
+二、控制反转与依赖注入
+Spring 的核心是 IoC（Inversion of Control，控制反转）：对象不再自己 new 依赖，而是由 Spring 容器在启动时创建并管理 Bean，再通过构造器、字段或 Setter 注入进来，这就是 DI（Dependency Injection，依赖注入）。在 RagAgent 项目中，DocumentController 通过构造器注入 IngestionService 和 DocumentParser，字段类型声明为接口，具体实现由容器按类型匹配注入，这使得将来把 Tika 实现替换成 PDFBox 实现时，Controller 一行代码都不用改。
+
+三、常用构造型注解
+@Component 是通用组件；@Service 用于业务编排层；@Repository 用于数据访问层，它还会把底层数据库异常翻译成统一的 DataAccessException；@Controller 与 @RestController 用于 Web 层，后者等价于 @Controller 加 @ResponseBody，方法返回值直接序列化为 JSON。它们在注册 Bean 这件事上底层完全相同，区别主要是语义分层。
+
+四、自动配置原理
+启动类上的 @SpringBootApplication 包含 @EnableAutoConfiguration。Spring Boot 启动时会读取各 jar 包中 META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports 文件列出的自动配置类，配合 @ConditionalOnClass、@ConditionalOnMissingBean 等条件注解决定哪些配置生效：classpath 上存在某个类才装配，用户自定义了同类型 Bean 就退避。
+
+五、配置文件与 Profile
+应用配置写在 application.yaml 中，可用 ${ENV_VAR:默认值} 注入环境变量。通过 spring.profiles.active 切换环境，例如 application-cloud.yaml 使用云端大模型，application-local.yaml 指向本机 LM Studio（127.0.0.1:1234）。RagAgent 的向量化配置键是 rag.embedding.model，检索条数键是 rag.retrieval.top-k，默认值为 3。
+
+六、验收暗号
+RagAgent PDF/HTML 解析功能的验收暗号是：青柠七三九二。如果向系统提问"RagAgent 的验收暗号是什么"，应当能从这份文档的分块中检索并回答出这个暗号。
+
+七、内嵌容器与打包
+spring-boot-starter-web 默认引入内嵌 Tomcat，打成可执行 JAR 后用 java -jar 即可启动。spring-boot-starter-webflux 提供响应式 WebClient，RagAgent 虽然 Web 容器是 Tomcat，仍可用 WebClient 以流式方式调用大模型接口，通过 SSE（Server-Sent Events）把回答逐字推送到浏览器。

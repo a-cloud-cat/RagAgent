@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Spring Boot 学习笔记（RagAgent 样本文档 HTML 版）</title>
+    <style>
+        body { font-family: sans-serif; color: #333; }
+        .secret-style { display: none; }
+    </style>
+    <script>
+        // 这段脚本内容不应出现在 Tika 提取的正文里：页面埋点，pv 加一
+        var pv = 0; pv = pv + 1;
+    </script>
+</head>
+<body>
+<h1>Spring Boot 学习笔记（RagAgent 样本文档 HTML 版）</h1>
+
+<h2>一、什么是 Spring Boot</h2>
+<p>Spring Boot 是基于 Spring 框架的快速开发脚手架，核心目标是<strong>约定优于配置</strong>。它通过自动配置（Auto-Configuration）、起步依赖（Starter）和内嵌 Web 容器三件套，让开发者不用再写大量 XML 配置，也不用单独部署 WAR 包到 Tomcat，main 方法一跑就能启动一个完整的 Web 应用。</p>
+
+<h2>二、控制反转与依赖注入</h2>
+<p>Spring 的核心是 IoC（Inversion of Control，控制反转）：对象不再自己 new 依赖，而是由 Spring 容器在启动时创建并管理 Bean，再通过构造器注入进来，这就是 DI（Dependency Injection，依赖注入）。在 RagAgent 项目中，<code>DocumentController</code> 通过构造器注入 <code>IngestionService</code> 和 <code>DocumentParser</code>，字段类型声明为接口，具体实现由容器按类型匹配注入。</p>
+
+<h2>三、常用构造型注解</h2>
+<ul>
+    <li><b>@Component</b>：通用组件，例如 TikaDocumentParser 这种可替换能力；</li>
+    <li><b>@Service</b>：业务编排层，例如 IngestionService 负责"建记录→切块→向量化→落库"的流程；</li>
+    <li><b>@Repository</b>：数据访问层，还会把底层数据库异常翻译成统一的 DataAccessException；</li>
+    <li><b>@RestController</b>：Web 层，方法返回值直接序列化为 JSON。</li>
+</ul>
+
+<h2>四、自动配置原理</h2>
+<p>启动类上的 <code>@SpringBootApplication</code> 包含 <code>@EnableAutoConfiguration</code>。Spring Boot 启动时读取各 jar 包中 <code>META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports</code> 列出的自动配置类，配合 <code>@ConditionalOnClass</code>、<code>@ConditionalOnMissingBean</code> 等条件注解决定哪些配置生效。</p>
+
+<h2>五、配置文件与 Profile</h2>
+<p>配置写在 <code>application.yaml</code>，可用 <code>${ENV_VAR:默认值}</code> 注入环境变量。通过 <code>spring.profiles.active</code> 切换 cloud / local 环境。RagAgent 的检索条数配置键是 <code>rag.retrieval.top-k</code>，默认值为 <b>3</b>。</p>
+
+<h2>六、验收暗号</h2>
+<p>RagAgent PDF/HTML 解析功能的验收暗号是：<strong>青柠七三九二</strong>。如果向系统提问"RagAgent 的验收暗号是什么"，应当能从这份文档的分块中检索并回答出这个暗号。</p>
+
+<h2>七、内嵌容器与流式响应</h2>
+<p><code>spring-boot-starter-web</code> 默认引入内嵌 Tomcat，打成可执行 JAR 后 <code>java -jar</code> 即可启动。RagAgent 用 <code>WebClient</code> 流式调用大模型，通过 SSE（Server-Sent Events）把回答逐字推送到浏览器。</p>
+</body>
+</html>

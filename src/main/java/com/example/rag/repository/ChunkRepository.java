@@ -51,10 +51,11 @@ public class ChunkRepository {
         PGobject vector = toPgVector(queryEmbedding);
 
         return jdbcTemplate.query(
-                "SELECT id, document_id, chunk_index, content, "
-                        + "1 - (embedding <=> ?) AS score "
-                        + "FROM t_chunk WHERE deleted = 0 AND embedding IS NOT NULL "
-                        + "ORDER BY embedding <=> ? LIMIT ?",
+                "SELECT c.id, c.document_id, d.name AS document_name, c.chunk_index, c.content, "
+                        + "1 - (c.embedding <=> ?) AS score "
+                        + "FROM t_chunk c JOIN t_document d ON c.document_id = d.id "
+                        + "WHERE c.deleted = 0 AND d.deleted = 0 AND c.embedding IS NOT NULL "
+                        + "ORDER BY c.embedding <=> ? LIMIT ?",
                 ps -> {
                     ps.setObject(1, vector);
                     ps.setObject(2, vector);
@@ -63,11 +64,11 @@ public class ChunkRepository {
                 this::mapRow);
     }
 
-    /**行映射回调方法（RowMapper），配合jdbcTemplate.query()使用**/
     private Chunk mapRow(ResultSet rs, int rowNum) throws SQLException {
         Chunk chunk = new Chunk();
         chunk.setId(rs.getLong("id"));
         chunk.setDocumentId(rs.getLong("document_id"));
+        chunk.setDocumentName(rs.getString("document_name"));
         chunk.setChunkIndex(rs.getInt("chunk_index"));
         chunk.setContent(rs.getString("content"));
         chunk.setScore(rs.getDouble("score"));

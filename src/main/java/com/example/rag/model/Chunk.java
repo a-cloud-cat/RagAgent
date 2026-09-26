@@ -1,13 +1,16 @@
 package com.example.rag.model;
 
 /**
- * 文档分块 t_chunk 对应实体；embedding 不参与检索结果回传，故此处只保留文本字段。
+ * 文档分块（t_chunk）实体。embedding 标记 transient，仅入库写入用，不随检索结果回传。
  */
 public class Chunk {
 
     private Long id;
 
     private Long documentId;
+
+    /** 所属文档名（检索时 JOIN t_document 带出，入库时不使用） */
+    private String documentName;
 
     private Integer chunkIndex;
 
@@ -43,6 +46,14 @@ public class Chunk {
 
     public void setDocumentId(Long documentId) {
         this.documentId = documentId;
+    }
+
+    public String getDocumentName() {
+        return documentName;
+    }
+
+    public void setDocumentName(String documentName) {
+        this.documentName = documentName;
     }
 
     public Integer getChunkIndex() {

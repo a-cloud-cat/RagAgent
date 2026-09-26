@@ -1,0 +1,42 @@
+[
+  {
+    "question": "Spring Boot 最核心的设计理念是什么？",
+    "document": "spring-boot-notes.html",
+    "expectedPhrase": "约定优于配置"
+  },
+  {
+    "question": "对象不自己 new 依赖、交给容器管理，这种思想叫什么？",
+    "document": "spring-boot-notes.html",
+    "expectedPhrase": "控制反转"
+  },
+  {
+    "question": "数据访问层组件应该标注哪个构造型注解？",
+    "document": "spring-boot-notes.html",
+    "expectedPhrase": "@Repository"
+  },
+  {
+    "question": "RagAgent 配置检索条数的配置键叫什么？",
+    "document": "spring-boot-notes.html",
+    "expectedPhrase": "rag.retrieval.top-k"
+  },
+  {
+    "question": "RagAgent 文档解析功能的验收暗号是什么？",
+    "document": "spring-boot-notes.html",
+    "expectedPhrase": "青柠七三九二"
+  },
+  {
+    "question": "spring-boot-starter-web 默认引入哪个内嵌 Web 容器？",
+    "document": "spring-boot-notes.html",
+    "expectedPhrase": "Tomcat"
+  },
+  {
+    "question": "RagAgent 用什么 HTTP 客户端流式调用大模型？",
+    "document": "spring-boot-notes.html",
+    "expectedPhrase": "WebClient"
+  },
+  {
+    "question": "Spring Boot 自动配置类的清单文件名是什么？",
+    "document": "spring-boot-notes.html",
+    "expectedPhrase": "AutoConfiguration.imports"
+  }
+]

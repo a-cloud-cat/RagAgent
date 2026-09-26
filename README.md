@@ -66,6 +66,11 @@ src/main/java/com/example/rag/
 │   ├── ChatController.java      # POST /chat（SSE）
 │   ├── DocumentController.java  # POST /documents（上传文档入库）
 │   └── GlobalExceptionHandler.java  # 统一异常：400 / 500
+├── eval/
+│   ├── EvalCase.java            # 评测用例模型（question/document/expectedPhrase）
+│   ├── EvalReport.java          # 评测报告（Hit@K/相似度/耗时 + 每题明细）
+│   ├── EvalService.java         # 加载用例 → 逐题检索 → 判定命中 → 汇总指标
+│   └── EvalController.java      # POST /eval/retrieval
 ├── embedding/
 │   ├── EmbeddingClient.java         # 向量化接口
 │   ├── OpenAiEmbeddingClient.java   # 百炼实现（维度/条数校验、分批）
@@ -91,6 +96,8 @@ src/main/resources/
 ├── database/
 │   ├── schema_pg.sql           # 建表 + pgvector 扩展 + HNSW 索引
 │   └── init_data_pg.sql        # 可选种子数据（默认无需预置）
+├── eval/
+│   └── retrieval-cases.json    # 检索评测集（问题 → 文档名 + 期望短语）
 └── static/index.html           # 前端页面（自动托管）
 src/test/
 ├── java/.../service/TextChunkerTest.java        # 切块边界（空/短/临界/超长/重叠）
@@ -98,6 +105,7 @@ src/test/
 ├── java/.../parser/TikaDocumentParserTest.java  # HTML 夹具：正文提取与标签剥离
 └── resources/parser/sample.html                 # 解析器测试夹具
 docker-compose.yml              # 本地 pgvector 容器
+docs/eval-baseline.md           # 检索评测基线（Hit@K 数字与复跑口径）
 ```
 
 ## 快速开始
@@ -130,6 +138,14 @@ docker-compose.yml              # 本地 pgvector 容器
    ```
 
 6. **开始提问**：浏览器访问 `http://localhost:8080/`，Enter 发送（Shift+Enter 换行）。
+
+7. **跑检索评测**（可选）：对 `src/main/resources/eval/retrieval-cases.json` 中的问题批量跑向量化 + topK 检索，返回 Hit@K 报告：
+
+   ```bash
+   curl -X POST http://localhost:8080/eval/retrieval
+   ```
+
+   基线数字与解读见 `docs/eval-baseline.md`，调整切块/topK/模型后重跑对比。
 
 ## 配置
 
@@ -179,6 +195,14 @@ curl：
 
 ```bash
 curl -N -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d '{"question":"你好"}'
+```
+
+**`POST /eval/retrieval`**，无请求体
+
+离线检索评测：逐题复用主链路（向量化 → topK 检索），以「文档名精确相等 + 分块文本包含期望短语（忽略大小写与空白）」判定命中。返回汇总指标（`topK / total / hits / hitRate / avgScore / avgLatencyMs / chunkSize / embeddingModel`）及每题 `hit / hitRank / retrieved` 明细。每次调用都会真实请求百炼向量化接口。
+
+```bash
+curl -X POST http://localhost:8080/eval/retrieval
 ```
 
 ## 备注

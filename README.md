@@ -1,6 +1,6 @@
 # RagAgent
 
-基于 **Spring Boot** 的 RAG（检索增强生成）流式对话应用：上传 `.txt` / `.pdf` / `.html` 文档后自动解析为纯文本、切块、向量化并存入 pgvector；提问时先检索最相似的知识分块拼入提示词，再经 `WebClient` 调用大模型（OpenAI 兼容接口），通过 SSE 逐字返回回复。
+基于 **Spring Boot** 的 RAG（检索增强生成）流式对话应用：上传 `.txt` / `.pdf` / `.html` 文档后自动解析为纯文本、切块、向量化并存入 pgvector；提问时先按 `candidate-limit` 召回候选分块、经 Rerank 精排取 topK 拼入提示词，再经 `WebClient` 调用大模型（OpenAI 兼容接口），通过 SSE 逐字返回回复。
 
 ## 技术栈
 
@@ -13,6 +13,7 @@
 | spring-boot-starter-jdbc | 3.2.0 | JdbcTemplate + Hikari 连接池访问 PostgreSQL |
 | PostgreSQL + pgvector | pg17 | 文档/分块存储与向量余弦相似度检索（HNSW 索引） |
 | 阿里云百炼 text-embedding-v4 | - | 文本向量化（1536 维，OpenAI 兼容协议） |
+| 阿里云百炼 qwen3-rerank | - | 候选分块精排（原生 text-rerank 端点，取 `output.results[]`） |
 | Apache Tika | 3.2.2 | PDF/HTML 等文档解析为纯文本 |
 | JUnit 5 / AssertJ / MockWebServer | Boot 3.2.0 管理 | 单元测试（test scope，不进生产包） |
 | springdoc-openapi | 2.3.0 | 接口文档，启动后访问 `/swagger-ui.html` |
@@ -43,7 +44,11 @@ ChunkRepository 批量写入 t_chunk（embedding::vector）→ 文档置 INGESTE
 浏览器 index.html
    │  POST /chat  {"question": "..."}
    ▼
-ChatService：问题向量化 → pgvector 余弦检索 topK 分块 → 拼入 system 提示词
+ChatService → RetrievalService（对话与评测共用同一条检索链路）
+   │  问题向量化 → pgvector 余弦召回 candidate-limit 条候选 → Rerank 精排截 topK
+   │  （Rerank 抛异常时降级为向量原始顺序前 topK，问答不中断）
+   ▼
+拼入 system 提示词
    │  WebClient.post()（stream=true；无召回时走普通对话）
    ▼
 大模型 /v1/chat/completions（云端 DeepSeek 或本地 LM Studio）
@@ -61,15 +66,16 @@ src/main/java/com/example/rag/
 │   ├── WebClientConfig.java     # WebClient Bean
 │   ├── LlmProperties.java       # llm.* 配置绑定
 │   ├── EmbeddingProperties.java # rag.embedding.* 配置绑定
-│   └── RetrievalProperties.java # rag.retrieval.* 配置绑定
+│   ├── RetrievalProperties.java # rag.retrieval.* 配置绑定（含 candidate-limit ≥ top-k 启动校验）
+│   └── RerankProperties.java    # rag.rerank.* 配置绑定
 ├── controller/
 │   ├── ChatController.java      # POST /chat（SSE）
 │   ├── DocumentController.java  # POST /documents（上传文档入库）
 │   └── GlobalExceptionHandler.java  # 统一异常：400 / 500
 ├── eval/
 │   ├── EvalCase.java            # 评测用例模型（question/document/expectedPhrase）
-│   ├── EvalReport.java          # 评测报告（Hit@K/相似度/耗时 + 每题明细）
-│   ├── EvalService.java         # 加载用例 → 逐题检索 → 判定命中 → 汇总指标
+│   ├── EvalReport.java          # 评测报告（Hit@K/MRR/耗时 + rerank 开关与模型 + 每题明细）
+│   ├── EvalService.java         # 加载用例 → 逐题检索 → 判定命中 → 汇总指标（MRR=Σ1/hitRank）
 │   └── EvalController.java      # POST /eval/retrieval
 ├── embedding/
 │   ├── EmbeddingClient.java         # 向量化接口
@@ -78,9 +84,15 @@ src/main/java/com/example/rag/
 ├── parser/
 │   ├── DocumentParser.java       # 文档解析接口：二进制流 → 纯文本
 │   └── TikaDocumentParser.java   # Tika 实现（PDF/HTML，异常包为 IllegalStateException）
+├── rerank/
+│   ├── RerankClient.java         # 精排接口：rerank(query, candidates, topN)
+│   ├── BaiLianRerankClient.java  # 百炼 qwen3-rerank（原生端点，按 index 映射回原 Chunk）
+│   ├── NoopRerankClient.java     # 开关关闭时的透传实现
+│   └── dto/                      # Rerank 请求/响应 DTO
 ├── service/
 │   ├── ChatService.java        # 检索增强 + 调用大模型并转发 SSE
 │   ├── IngestionService.java   # 入库编排：切块 → 向量化 → 落库
+│   ├── RetrievalService.java   # 共享检索链路：向量化 → 候选召回 → 精排 → topK
 │   └── TextChunker.java        # 滑动窗口文本切块
 ├── repository/
 │   ├── DocumentRepository.java # t_document 数据访问
@@ -90,7 +102,7 @@ src/main/java/com/example/rag/
     ├── Document.java
     └── Chunk.java
 src/main/resources/
-├── application.yaml            # 公共配置：数据源、profile、embedding/retrieval
+├── application.yaml            # 公共配置：数据源、profile、embedding/retrieval/rerank
 ├── application-cloud.yaml      # 云端 DeepSeek
 ├── application-local.yaml      # 本地 LM Studio
 ├── database/
@@ -103,6 +115,7 @@ src/test/
 ├── java/.../service/TextChunkerTest.java        # 切块边界（空/短/临界/超长/重叠）
 ├── java/.../embedding/OpenAiEmbeddingClientTest.java  # MockWebServer 桩：请求体与条数/维度校验
 ├── java/.../parser/TikaDocumentParserTest.java  # HTML 夹具：正文提取与标签剥离
+├── java/.../rerank/BaiLianRerankClientTest.java # MockWebServer 桩：请求体与重排顺序
 └── resources/parser/sample.html                 # 解析器测试夹具
 docker-compose.yml              # 本地 pgvector 容器
 docs/eval-baseline.md           # 检索评测基线（Hit@K 数字与复跑口径）
@@ -139,13 +152,13 @@ docs/eval-baseline.md           # 检索评测基线（Hit@K 数字与复跑口�
 
 6. **开始提问**：浏览器访问 `http://localhost:8080/`，Enter 发送（Shift+Enter 换行）。
 
-7. **跑检索评测**（可选）：对 `src/main/resources/eval/retrieval-cases.json` 中的问题批量跑向量化 + topK 检索，返回 Hit@K 报告：
+7. **跑检索评测**（可选）：对 `src/main/resources/eval/retrieval-cases.json` 中的问题批量跑「向量化 → 候选召回 → 精排」，返回 Hit@K / MRR 报告：
 
    ```bash
    curl -X POST http://localhost:8080/eval/retrieval
    ```
 
-   基线数字与解读见 `docs/eval-baseline.md`，调整切块/topK/模型后重跑对比。
+   基线数字与解读见 `docs/eval-baseline.md`，调整切块/topK/candidate-limit/模型后重跑对比。注意基线里的「Rerank 开启」一列需要先把 `rag.rerank.enabled` 改为 `true` 再跑，仓库默认是关闭。
 
 ## 配置
 
@@ -167,7 +180,13 @@ rag:
     model: text-embedding-v4
     dimension: 1536       # 必须与库中 vector(1536) 一致；v4 默认 1024，不显式传会维度不符
   retrieval:
-    top-k: 3              # 每次提问召回的最相似分块数
+    top-k: 3              # 最终送入 LLM 的分块条数
+    candidate-limit: 20   # 送 Rerank 精排的候选池大小（必须 ≥ top-k，否则启动失败）
+  rerank:
+    enabled: false        # 关闭时 NoopRerankClient 原样透传；开启时调百炼 qwen3-rerank
+    model: qwen3-rerank
+    base-url: https://dashscope.aliyuncs.com
+    api-key: ${DASHSCOPE_API_KEY:}
 ```
 
 对话模型按 profile 区分（见 `application-cloud.yaml` / `application-local.yaml`），切换方式：改配置文件，或在 IDEA 运行配置的 Active profiles 填 `local`/`cloud` 临时覆盖。
@@ -199,7 +218,7 @@ curl -N -X POST http://localhost:8080/chat -H "Content-Type: application/json" -
 
 **`POST /eval/retrieval`**，无请求体
 
-离线检索评测：逐题复用主链路（向量化 → topK 检索），以「文档名精确相等 + 分块文本包含期望短语（忽略大小写与空白）」判定命中。返回汇总指标（`topK / total / hits / hitRate / avgScore / avgLatencyMs / chunkSize / embeddingModel`）及每题 `hit / hitRank / retrieved` 明细。每次调用都会真实请求百炼向量化接口。
+离线检索评测：逐题复用主链路（向量化 → candidate-limit 候选召回 → Rerank 精排截 topK），以「文档名精确相等 + 分块文本包含期望短语（忽略大小写与空白）」判定命中。返回汇总指标（`topK / total / hits / hitRate / mrr / avgScore / avgLatencyMs / chunkSize / embeddingModel / rerankEnabled / rerankModel`）及每题 `hit / hitRank / latencyMs / retrieved` 明细。每次调用都会真实请求百炼向量化接口（开启 Rerank 时额外请求 rerank 接口）。
 
 ```bash
 curl -X POST http://localhost:8080/eval/retrieval
@@ -209,6 +228,8 @@ curl -X POST http://localhost:8080/eval/retrieval
 
 - 依赖 PostgreSQL + pgvector，启动前请确认容器已运行且已执行 `schema_pg.sql`。
 - 向量维度需三处一致：百炼请求参数、`rag.embedding.dimension`、库中 `vector(1536)`；客户端对返回条数与维度都做了校验，不一致会快速失败。
+- `rag.rerank.enabled` 仓库默认 `false`（`NoopRerankClient` 原样透传候选顺序），置 `true` 才走百炼 `qwen3-rerank`；评测报告里的 `rerankEnabled` 字段可以确认本次跑的是哪一种。
+- Rerank 走百炼**原生端点** `/api/v1/services/rerank/text-rerank/text-rerank`（不是 OpenAI 兼容格式），响应取 `output.results[].{index, relevance_score}`。`relevance_score` 与向量余弦分不是同一把尺子，只用于本次排序，别跨模式比较或混排。
 - 常见问题：发送失败多为模型服务未启动 / 模型名不一致 / API key 未注入；8080 被占用可用 `Get-NetTCPConnection -LocalPort 8080` 查进程后结束，或改 `server.port`。
 
 ## 命令
@@ -216,7 +237,7 @@ curl -X POST http://localhost:8080/eval/retrieval
 ```bash
 docker compose up -d              # 启动 pgvector
 mvn compile                       # 编译
-mvn test                          # 运行单元测试（离线、无需 Docker，共 11 个用例）
+mvn test                          # 运行单元测试（离线、无需 Docker，共 15 个用例）
 mvn spring-boot:run               # 运行
 mvn clean package -DskipTests     # 打包
 ```

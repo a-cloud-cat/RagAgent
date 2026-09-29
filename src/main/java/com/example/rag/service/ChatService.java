@@ -13,10 +13,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.example.rag.config.LlmProperties;
-import com.example.rag.config.RetrievalProperties;
-import com.example.rag.embedding.EmbeddingClient;
 import com.example.rag.model.Chunk;
-import com.example.rag.repository.ChunkRepository;
 
 import reactor.core.publisher.Flux;
 
@@ -38,28 +35,19 @@ public class ChatService {
 
     private final LlmProperties llmProperties;
 
-    private final EmbeddingClient embeddingClient;
-
-    private final ChunkRepository chunkRepository;
-
-    private final RetrievalProperties retrievalProperties;
+    private final RetrievalService retrievalService;
 
     public ChatService(WebClient webClient,
                        LlmProperties llmProperties,
-                       EmbeddingClient embeddingClient,
-                       ChunkRepository chunkRepository,
-                       RetrievalProperties retrievalProperties) {
+                       RetrievalService retrievalService) {
         this.webClient = webClient;
         this.llmProperties = llmProperties;
-        this.embeddingClient = embeddingClient;
-        this.chunkRepository = chunkRepository;
-        this.retrievalProperties = retrievalProperties;
+        this.retrievalService = retrievalService;
     }
 
     public void streamChat(String question, SseEmitter emitter) {
-        // 1) 问题向量化 → 2) 检索最相似的 topK 分块 → 3) 拼成上下文
-        float[] questionVector = embeddingClient.embed(List.of(question)).get(0);
-        List<Chunk> retrieved = chunkRepository.search(questionVector, retrievalProperties.getTopK());
+        // 检索链路：向量化 → 候选召回 → Rerank → 截 topK
+        List<Chunk> retrieved = retrievalService.retrieve(question);
 
         if (retrieved.isEmpty()) {
             log.info("未召回任何分块，按普通对话处理");

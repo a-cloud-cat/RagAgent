@@ -9,17 +9,17 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 import com.example.rag.config.EmbeddingProperties;
+import com.example.rag.config.RerankProperties;
 import com.example.rag.config.RetrievalProperties;
-import com.example.rag.embedding.EmbeddingClient;
 import com.example.rag.eval.EvalReport.CaseResult;
 import com.example.rag.eval.EvalReport.RetrievedChunk;
 import com.example.rag.model.Chunk;
-import com.example.rag.repository.ChunkRepository;
+import com.example.rag.service.RetrievalService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * 检索评测服务：加载评测用例，逐题复用主链路跑向量化与 topK 检索，判定命中并汇总指标。
+ * 检索评测服务：加载评测用例，逐题复用主链路跑检索，判定命中并汇总指标（含 MRR）。
  */
 @Service
 public class EvalService {
@@ -35,24 +35,24 @@ public class EvalService {
 
     private final ObjectMapper objectMapper;
 
-    private final EmbeddingClient embeddingClient;
-
-    private final ChunkRepository chunkRepository;
+    private final RetrievalService retrievalService;
 
     private final RetrievalProperties retrievalProperties;
 
     private final EmbeddingProperties embeddingProperties;
 
+    private final RerankProperties rerankProperties;
+
     public EvalService(ObjectMapper objectMapper,
-                       EmbeddingClient embeddingClient,
-                       ChunkRepository chunkRepository,
+                       RetrievalService retrievalService,
                        RetrievalProperties retrievalProperties,
-                       EmbeddingProperties embeddingProperties) {
+                       EmbeddingProperties embeddingProperties,
+                       RerankProperties rerankProperties) {
         this.objectMapper = objectMapper;
-        this.embeddingClient = embeddingClient;
-        this.chunkRepository = chunkRepository;
+        this.retrievalService = retrievalService;
         this.retrievalProperties = retrievalProperties;
         this.embeddingProperties = embeddingProperties;
+        this.rerankProperties = rerankProperties;
     }
 
     /**
@@ -68,16 +68,17 @@ public class EvalService {
         int hits = 0;
         double scoreSum = 0;
         double latencySum = 0;
+        double mrrSum = 0;
 
         for (EvalCase evalCase : cases) {
             long start = System.nanoTime();
-            float[] queryVector = embeddingClient.embed(List.of(evalCase.getQuestion())).get(0);
-            List<Chunk> retrieved = chunkRepository.search(queryVector, topK);
+            List<Chunk> retrieved = retrievalService.retrieve(evalCase.getQuestion());
             double latencyMs = (System.nanoTime() - start) / 1_000_000.0;
 
             int hitRank = findHitRank(evalCase, retrieved);
             if (hitRank > 0) {
                 hits++;
+                mrrSum += 1.0 / hitRank;
             }
             if (!retrieved.isEmpty()) {
                 scoreSum += retrieved.get(0).getScore();
@@ -93,10 +94,13 @@ public class EvalService {
         report.setTotal(total);
         report.setHits(hits);
         report.setHitRate(total == 0 ? 0 : round3((double) hits / total));
+        report.setMrr(total == 0 ? 0 : round3(mrrSum / total));
         report.setAvgScore(total == 0 ? 0 : round3(scoreSum / total));
         report.setAvgLatencyMs(total == 0 ? 0 : round3(latencySum / total));
         report.setChunkSize(CHUNK_SIZE_DESC);
         report.setEmbeddingModel(embeddingProperties.getModel());
+        report.setRerankEnabled(rerankProperties.isEnabled());
+        report.setRerankModel(rerankProperties.isEnabled() ? rerankProperties.getModel() : null);
         report.setCases(results);
         return report;
     }

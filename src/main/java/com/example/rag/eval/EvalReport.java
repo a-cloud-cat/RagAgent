@@ -19,6 +19,9 @@ public class EvalReport {
     /** 命中率 hits / total（0~1） */
     private double hitRate;
 
+    /** MRR：所有题 1/hitRank 的均值（未命中按 0 计） */
+    private double mrr;
+
     /** 每题第 1 名召回分块相似度的均值 */
     private double avgScore;
 
@@ -30,6 +33,12 @@ public class EvalReport {
 
     /** 评测时的向量模型名 */
     private String embeddingModel;
+
+    /** 评测时是否启用 Rerank */
+    private boolean rerankEnabled;
+
+    /** 评测时的 rerank 模型名（未启用时为 null） */
+    private String rerankModel;
 
     /** 每题一条明细 */
     private List<CaseResult> cases;
@@ -66,6 +75,14 @@ public class EvalReport {
         this.hitRate = hitRate;
     }
 
+    public double getMrr() {
+        return mrr;
+    }
+
+    public void setMrr(double mrr) {
+        this.mrr = mrr;
+    }
+
     public double getAvgScore() {
         return avgScore;
     }
@@ -96,6 +113,22 @@ public class EvalReport {
 
     public void setEmbeddingModel(String embeddingModel) {
         this.embeddingModel = embeddingModel;
+    }
+
+    public boolean isRerankEnabled() {
+        return rerankEnabled;
+    }
+
+    public void setRerankEnabled(boolean rerankEnabled) {
+        this.rerankEnabled = rerankEnabled;
+    }
+
+    public String getRerankModel() {
+        return rerankModel;
+    }
+
+    public void setRerankModel(String rerankModel) {
+        this.rerankModel = rerankModel;
     }
 
     public List<CaseResult> getCases() {

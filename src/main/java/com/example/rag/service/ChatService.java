@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -15,6 +17,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.example.rag.config.LlmProperties;
 import com.example.rag.model.Chunk;
 
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 
 @Service
@@ -80,19 +83,45 @@ public class ChatService {
                 .retrieve()
                 .bodyToFlux(String.class);
 
-        // 订阅 Flux，三个回调分别处理：每个数据块、错误、完成。
-        flux.subscribe(
+        // 订阅句柄提升到与 emitter 同作用域：断连/超时/发送失败时取消，上游随即停止生成
+        AtomicReference<Disposable> subscriptionRef = new AtomicReference<>();
+        // 区分正常结束与客户端中途断开：onCompletion 两种情况都会触发
+        AtomicBoolean completedNormally = new AtomicBoolean(false);
+        Disposable subscription = flux.subscribe(
                 chunk -> {
                     try {
                         emitter.send(chunk);
                     } catch (IOException e) {
-                        log.error("sse发送异常", e);
+                        log.warn("SSE 发送失败，客户端可能已断开，取消上游订阅", e);
+                        subscriptionRef.get().dispose();
                         emitter.completeWithError(e);
                     }
                 },
-                emitter::completeWithError,
-                emitter::complete
+                e -> {
+                    log.error("上游 LLM 流式调用失败", e);
+                    emitter.completeWithError(e);
+                },
+                () -> {
+                    completedNormally.set(true);
+                    emitter.complete();
+                }
         );
+        subscriptionRef.set(subscription);
+
+        emitter.onCompletion(() -> {
+            if (!completedNormally.get()) {
+                log.info("客户端断开 SSE，取消上游订阅");
+            }
+            subscription.dispose();
+        });
+        emitter.onTimeout(() -> {
+            log.warn("SSE 连接超时，取消上游订阅");
+            subscription.dispose();
+        });
+        emitter.onError(e -> {
+            log.debug("SSE 异步错误回调：{}", e.toString());
+            subscription.dispose();
+        });
     }
 
     /** 把召回分块编号拼接成参考资料文本。 */

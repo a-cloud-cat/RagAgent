@@ -31,6 +31,29 @@
         }
         .msg { display: flex; max-width: 80%; }
         .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+        .user-col { display: flex; flex-direction: column; align-items: flex-end; }
+        .msg-actions { display: flex; gap: 12px; margin-top: 4px; }
+        .msg-btn {
+            font-size: 12px;
+            color: #6b7280;
+            background: none;
+            border: none;
+            padding: 2px;
+            cursor: pointer;
+        }
+        .msg-btn:hover { color: #2563eb; }
+        .edit-input {
+            width: 320px;
+            max-width: 70vw;
+            border: 1px solid #2563eb;
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 15px;
+            font-family: inherit;
+            line-height: 1.7;
+            resize: vertical;
+            outline: none;
+        }
         .bubble {
             padding: 10px 14px;
             border-radius: 10px;
@@ -94,6 +117,16 @@
             height: 44px;
         }
         #send:disabled { background: #9ca3af; cursor: not-allowed; }
+        #send.stopping { background: #fff; color: #dc2626; border: 1px solid #dc2626; }
+        .stop-mark {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #dc2626;
+            border-radius: 2px;
+            margin-right: 6px;
+            vertical-align: -1px;
+        }
         .hint { text-align: center; color: #9ca3af; font-size: 13px; margin-top: 30px; }
         .degraded-banner {
             background: #fff7ed;
@@ -194,22 +227,107 @@
     }
     // 会话内"已知晓知识库不可用"的确认状态；知识库恢复后重置，不做永久放行
     let degradedConfirmed = false;
+    // 当前进行中请求的取消句柄，空闲为 null；供终止按钮跨事件访问
+    let currentAbort = null;
 
     inputEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            send();
+            if (!busy) send();
         }
     });
-    sendBtn.addEventListener('click', send);
+    // 同一按钮两态：生成中点击终止，空闲点击发送
+    sendBtn.addEventListener('click', () => {
+        if (busy) currentAbort && currentAbort.abort();
+        else send();
+    });
 
-    function addBubble(role) {
+    function setStoppingUi(stopping) {
+        sendBtn.classList.toggle('stopping', stopping);
+        sendBtn.innerHTML = stopping ? '<span class="stop-mark"></span>终止' : '发送';
+    }
+
+    // 用户消息：气泡下方挂「重新发送 / 修改」，列容器保证操作区贴气泡右缘
+    function addUserMessage(question) {
         const wrap = document.createElement('div');
-        wrap.className = 'msg ' + role;
+        wrap.className = 'msg user';
+        const col = document.createElement('div');
+        col.className = 'user-col';
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        bubble.textContent = question;
+        const actions = document.createElement('div');
+        actions.className = 'msg-actions';
+        col.appendChild(bubble);
+        col.appendChild(actions);
+        wrap.appendChild(col);
+        messagesEl.appendChild(wrap);
+        renderActions(wrap, bubble);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return { wrap, bubble };
+    }
+
+    // 重发/修改共用的操作按钮；编辑态结束后也用它恢复
+    function renderActions(wrap, bubble) {
+        const actions = wrap.querySelector('.msg-actions');
+        actions.innerHTML = '';
+        const resendBtn = document.createElement('button');
+        resendBtn.className = 'msg-btn';
+        resendBtn.textContent = '重新发送';
+        resendBtn.onclick = () => { if (!busy) runTurn(bubble.textContent, wrap); };
+        const editBtn = document.createElement('button');
+        editBtn.className = 'msg-btn';
+        editBtn.textContent = '修改';
+        editBtn.onclick = () => { if (!busy) enterEdit(wrap, bubble); };
+        actions.appendChild(resendBtn);
+        actions.appendChild(editBtn);
+    }
+
+    // 气泡就地变编辑框：发送后原地重生，取消恢复原状
+    function enterEdit(wrap, bubble) {
+        const actions = wrap.querySelector('.msg-actions');
+        const editArea = document.createElement('textarea');
+        editArea.className = 'edit-input';
+        editArea.value = bubble.textContent;
+        bubble.replaceWith(editArea);
+        actions.innerHTML = '';
+        const okBtn = document.createElement('button');
+        okBtn.className = 'msg-btn';
+        okBtn.textContent = '发送';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'msg-btn';
+        cancelBtn.textContent = '取消';
+        actions.appendChild(okBtn);
+        actions.appendChild(cancelBtn);
+        editArea.focus();
+
+        function restore() {
+            editArea.replaceWith(bubble);
+            renderActions(wrap, bubble);
+        }
+        okBtn.onclick = () => {
+            const q = editArea.value.trim();
+            if (!q) { restore(); return; }
+            bubble.textContent = q;
+            editArea.replaceWith(bubble);
+            renderActions(wrap, bubble);
+            runTurn(q, wrap);
+        };
+        cancelBtn.onclick = restore;
+        editArea.onkeydown = (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); okBtn.click(); }
+            if (e.key === 'Escape') restore();
+        };
+    }
+
+    // AI 气泡紧跟用户消息插入：重发历史消息时回答也留在原位，不跑到列表底部
+    function addAiBubbleAfter(userWrap) {
+        const wrap = document.createElement('div');
+        wrap.className = 'msg ai';
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
         wrap.appendChild(bubble);
-        messagesEl.appendChild(wrap);
+        userWrap.after(wrap);
         messagesEl.scrollTop = messagesEl.scrollHeight;
         return bubble;
     }
@@ -238,9 +356,19 @@
         bubble.prepend(banner);
     }
 
+    // 输入框发送：userWrap 传 null，确认通过后再建气泡，取消则输入框内容保留
     async function send() {
         const question = inputEl.value.trim();
         if (!question || busy) return;
+        runTurn(question, null);
+    }
+
+    // 一个问答回合：新建、重新发送、修改共用。userWrap 决定回答气泡插在哪
+    async function runTurn(question, userWrap) {
+        if (busy) return;
+
+        const hint = messagesEl.querySelector('.hint');
+        if (hint) hint.remove();
 
         const retrievalReady = await refreshKbStatus();
         let skipRetrieval = false;
@@ -255,16 +383,20 @@
             skipRetrieval = true;
         }
 
+        // 确认完成后才建消息/丢弃旧回答，避免用户在确认框点取消却已清空原答案
+        if (!userWrap) {
+            userWrap = addUserMessage(question).wrap;
+            inputEl.value = '';
+        }
+        const oldAi = userWrap.nextElementSibling;
+        if (oldAi && oldAi.classList.contains('ai')) oldAi.remove();
+
         busy = true;
-        sendBtn.disabled = true;
+        const abortController = new AbortController();
+        currentAbort = abortController;
+        setStoppingUi(true);
 
-        const hint = messagesEl.querySelector('.hint');
-        if (hint) hint.remove();
-
-        addBubble('user').textContent = question;
-        inputEl.value = '';
-
-        const bubble = addBubble('ai');
+        const bubble = addAiBubbleAfter(userWrap);
         if (skipRetrieval) {
             addDegradedBanner(bubble);
         }
@@ -285,7 +417,8 @@
             const resp = await fetch('/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question, skipRetrieval })
+                body: JSON.stringify({ question, skipRetrieval }),
+                signal: abortController.signal
             });
             if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
 
@@ -346,15 +479,22 @@
                 }
             }
         } catch (err) {
-            content.textContent = '请求失败：' + err.message + '（请确认后端已启动且大模型服务可访问）';
-            content.style.color = '#dc2626';
+            if (err.name === 'AbortError') {
+                // 用户主动终止不是故障：保留已生成内容，追加灰色停止标记
+                content.textContent += (content.textContent ? '\n' : '') + '（已停止）';
+                content.style.color = '#9ca3af';
+            } else {
+                content.textContent = '请求失败：' + err.message + '（请确认后端已启动且大模型服务可访问）';
+                content.style.color = '#dc2626';
+            }
         } finally {
             finish();
         }
 
         function finish() {
             busy = false;
-            sendBtn.disabled = false;
+            currentAbort = null;
+            setStoppingUi(false);
             inputEl.focus();
         }
     }

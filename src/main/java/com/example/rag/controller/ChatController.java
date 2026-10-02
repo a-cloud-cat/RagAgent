@@ -25,7 +25,7 @@ public class ChatController {
 
         SseEmitter emitter = new SseEmitter(3 * 60 * 1000L);
 
-        chatService.streamChat(req.getQuestion(), emitter);
+        chatService.streamChat(req.getQuestion(), emitter, req.isSkipRetrieval());
 
         return emitter;
     }

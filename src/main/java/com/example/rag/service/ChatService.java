@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -48,13 +49,31 @@ public class ChatService {
         this.retrievalService = retrievalService;
     }
 
-    public void streamChat(String question, SseEmitter emitter) {
-        // 检索链路：向量化 → 候选召回 → Rerank → 截 topK
-        List<Chunk> retrieved = retrievalService.retrieve(question);
+    public void streamChat(String question, SseEmitter emitter, boolean skipRetrieval) {
+        List<Chunk> retrieved = List.of();
 
-        if (retrieved.isEmpty()) {
-            log.info("未召回任何分块，按普通对话处理");
+        if (skipRetrieval) {
+            log.info("用户已确认知识库不可用，跳过检索，按普通对话处理");
         } else {
+            try {
+                // 检索链路：向量化 → 候选召回 → Rerank → 截 topK
+                retrieved = retrievalService.retrieve(question);
+            } catch (Exception e) {
+                // 请求中途才暴露的故障（DB 断开、embedding 失败）：通知前端后降级为裸 LLM
+                log.error("检索链路失败，降级为普通对话", e);
+                try {
+                    emitter.send(SseEmitter.event()
+                            .name("degraded")
+                            .data(Map.of("reason", "知识库暂时不可用，以下回答未基于资料"),
+                                    MediaType.APPLICATION_JSON));
+                } catch (IOException ioe) {
+                    emitter.completeWithError(ioe);
+                    return;
+                }
+            }
+        }
+
+        if (!retrieved.isEmpty()) {
             log.info("召回 {} 个分块，相似度：{}",
                     retrieved.size(),
                     retrieved.stream()

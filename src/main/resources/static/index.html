@@ -95,6 +95,46 @@
         }
         #send:disabled { background: #9ca3af; cursor: not-allowed; }
         .hint { text-align: center; color: #9ca3af; font-size: 13px; margin-top: 30px; }
+        .degraded-banner {
+            background: #fff7ed;
+            border: 1px solid #fdba74;
+            color: #c2410c;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 8px;
+        }
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-dialog {
+            background: #fff;
+            border-radius: 12px;
+            padding: 22px 24px 18px;
+            width: 380px;
+            max-width: calc(100vw - 40px);
+            box-shadow: 0 12px 40px rgba(0,0,0,.2);
+        }
+        .modal-title { font-size: 16px; font-weight: 600; color: #1f2937; margin-bottom: 10px; }
+        .modal-text { font-size: 14px; color: #4b5563; line-height: 1.7; margin-bottom: 20px; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+        .modal-actions button {
+            border: none;
+            border-radius: 8px;
+            padding: 8px 18px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        #modal-cancel { background: #f3f4f6; color: #374151; }
+        #modal-ok { background: #2563eb; color: #fff; }
     </style>
 </head>
 <body>
@@ -102,16 +142,58 @@
 <div id="messages">
     <div class="hint">在下方输入问题开始对话（接口 POST /chat，SSE 流式返回）</div>
 </div>
+<div id="kb-status" class="degraded-banner" style="display:none; margin:0 20px 8px;">知识库未连接，当前回答将不基于资料</div>
 <div id="input-bar">
     <textarea id="question" placeholder="输入问题，Enter 发送，Shift+Enter 换行"></textarea>
     <button id="send">发送</button>
+</div>
+
+<div id="confirm-modal" class="modal-overlay">
+    <div class="modal-dialog">
+        <div class="modal-title">知识库未连接</div>
+        <div id="modal-text" class="modal-text"></div>
+        <div class="modal-actions">
+            <button id="modal-cancel">取消</button>
+            <button id="modal-ok">直接使用大模型</button>
+        </div>
+    </div>
 </div>
 
 <script>
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('question');
     const sendBtn = document.getElementById('send');
+    const kbStatusEl = document.getElementById('kb-status');
+    const modalEl = document.getElementById('confirm-modal');
+    const modalTextEl = document.getElementById('modal-text');
+    const modalOkBtn = document.getElementById('modal-ok');
+    const modalCancelBtn = document.getElementById('modal-cancel');
     let busy = false;
+
+    // Promise 化的居中确认框：resolve(true)=确认降级，resolve(false)=取消发送
+    function confirmModal(text) {
+        return new Promise((resolve) => {
+            modalTextEl.textContent = text;
+            modalEl.classList.add('show');
+            modalOkBtn.focus();
+
+            function cleanup(result) {
+                modalEl.classList.remove('show');
+                modalOkBtn.onclick = null;
+                modalCancelBtn.onclick = null;
+                document.onkeydown = null;
+                resolve(result);
+            }
+            modalOkBtn.onclick = () => cleanup(true);
+            modalCancelBtn.onclick = () => cleanup(false);
+            document.onkeydown = (e) => {
+                if (e.key === 'Escape') cleanup(false);
+                if (e.key === 'Enter') cleanup(true);
+            };
+        });
+    }
+    // 会话内"已知晓知识库不可用"的确认状态；知识库恢复后重置，不做永久放行
+    let degradedConfirmed = false;
 
     inputEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -132,9 +214,47 @@
         return bubble;
     }
 
+    // 探活并同步常驻提示条：true=知识库可用；网络错误（后端未启动）按可用处理，交给正式请求报错
+    async function refreshKbStatus() {
+        let ready = true;
+        try {
+            const resp = await fetch('/health/retrieval');
+            const data = await resp.json();
+            ready = data.retrievalReady === true;
+        } catch (e) {
+            ready = true;
+        }
+        kbStatusEl.style.display = ready ? 'none' : 'block';
+        return ready;
+    }
+
+    // 页面加载即探活，pg 未启动时立刻给出常驻提示
+    refreshKbStatus();
+
+    function addDegradedBanner(bubble, reason) {
+        const banner = document.createElement('div');
+        banner.className = 'degraded-banner';
+        banner.textContent = reason || '知识库暂时不可用，以下回答未基于资料';
+        bubble.prepend(banner);
+    }
+
     async function send() {
         const question = inputEl.value.trim();
         if (!question || busy) return;
+
+        const retrievalReady = await refreshKbStatus();
+        let skipRetrieval = false;
+        if (retrievalReady) {
+            degradedConfirmed = false;
+        } else {
+            if (!degradedConfirmed) {
+                const ok = await confirmModal('本次回答将不基于知识库资料，大模型可能产生幻觉。确认直接使用大模型回答吗？');
+                if (!ok) return;
+                degradedConfirmed = true;
+            }
+            skipRetrieval = true;
+        }
+
         busy = true;
         sendBtn.disabled = true;
 
@@ -145,6 +265,9 @@
         inputEl.value = '';
 
         const bubble = addBubble('ai');
+        if (skipRetrieval) {
+            addDegradedBanner(bubble);
+        }
         const reasoning = document.createElement('details');
         reasoning.className = 'reasoning';
         reasoning.open = true;
@@ -162,7 +285,7 @@
             const resp = await fetch('/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question })
+                body: JSON.stringify({ question, skipRetrieval })
             });
             if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
 
@@ -170,6 +293,7 @@
             const decoder = new TextDecoder('utf-8');
             let buffer = '';
             let gotContent = false;
+            let eventName = '';
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -180,18 +304,33 @@
                 while ((idx = buffer.indexOf('\n')) >= 0) {
                     let line = buffer.slice(0, idx).trim();
                     buffer = buffer.slice(idx + 1);
-                    if (!line) continue;
+                    if (!line) { eventName = ''; continue; }
+
+                    if (line.toLowerCase().startsWith('event:')) {
+                        eventName = line.slice(6).trim();
+                        continue;
+                    }
 
                     while (line.toLowerCase().startsWith('data:')) {
                         line = line.slice(5).trim();
                     }
                     if (!line) continue;
+
                     if (line === '[DONE]') {
                         finish();
                         return;
                     }
+
                     let json;
                     try { json = JSON.parse(line); } catch (e) { continue; }
+
+                    // 命名事件：检索链路中途故障的降级通知，与 token 流协议级分流
+                    if (eventName === 'degraded') {
+                        addDegradedBanner(bubble, json.reason);
+                        eventName = '';
+                        continue;
+                    }
+                    eventName = '';
 
                     const delta = json.choices && json.choices[0] && json.choices[0].delta;
                     if (!delta) continue;
@@ -207,7 +346,7 @@
                 }
             }
         } catch (err) {
-            content.textContent = '请求失败：' + err.message + '（请确认后端已启动且 LM Studio 在 1234 端口运行）';
+            content.textContent = '请求失败：' + err.message + '（请确认后端已启动且大模型服务可访问）';
             content.style.color = '#dc2626';
         } finally {
             finish();

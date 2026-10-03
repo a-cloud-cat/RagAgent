@@ -79,16 +79,22 @@ public class EvalService {
             double latencyMs = (System.nanoTime() - start) / 1_000_000.0;
 
             int hitRank = findHitRank(evalCase, retrieved);
-            if (hitRank > 0) {
+            boolean negative = normalize(evalCase.getExpectedPhrase()).isEmpty();
+            // 负例：未命中（hitRank==0）才算正确；正例：命中（hitRank>0）才算正确
+            boolean hit = negative ? hitRank == 0 : hitRank > 0;
+            // 负例正确时展示为名次 1（MRR 贡献 1.0），失败为 0
+            int displayRank = negative ? (hit ? 1 : 0) : hitRank;
+
+            if (hit) {
                 hits++;
-                mrrSum += 1.0 / hitRank;
+                mrrSum += displayRank > 0 ? 1.0 / displayRank : 0;
             }
             if (!retrieved.isEmpty()) {
                 scoreSum += retrieved.get(0).getScore();
             }
             latencySum += latencyMs;
 
-            results.add(buildCaseResult(evalCase, retrieved, hitRank, latencyMs));
+            results.add(buildCaseResult(evalCase, retrieved, hit, displayRank, latencyMs));
         }
 
         int total = cases.size();
@@ -136,17 +142,67 @@ public class EvalService {
 
     /**
      * 按召回顺序返回第一个命中分块的名次（1 起算），未命中返回 0。
-     * 命中条件：文档名精确相等，且分块内容包含期望短语（均做去空白、忽略大小写归一化）。
+     * 正例命中条件：文档名精确相等，且分块内容包含期望短语；单块未命中时再尝试相邻分块拼接。
+     * 负例（expectedPhrase 为空）：返回匹配到期望文档的分块名次，未匹配返回 0（=未命中=正确拒答）。
      */
     private int findHitRank(EvalCase evalCase, List<Chunk> retrieved) {
-        String expectedDocument = evalCase.getDocument().trim();
+        String expectedDocument = evalCase.getDocument() == null ? "" : evalCase.getDocument().trim();
         String expectedPhrase = normalize(evalCase.getExpectedPhrase());
+        boolean negative = expectedPhrase.isEmpty();
 
+        if (!negative) {
+            for (int i = 0; i < retrieved.size(); i++) {
+                Chunk chunk = retrieved.get(i);
+                if (expectedDocument.equals(chunk.getDocumentName())
+                        && normalize(chunk.getContent()).contains(expectedPhrase)) {
+                    return i + 1;
+                }
+            }
+            // 单块未命中，尝试答案被分块边界切断的情形：拼接文档内相邻两块再匹配
+            for (int i = 0; i < retrieved.size(); i++) {
+                for (int j = 0; j < retrieved.size(); j++) {
+                    if (i == j) {
+                        continue;
+                    }
+                    Chunk a = retrieved.get(i);
+                    Chunk b = retrieved.get(j);
+                    if (b.getChunkIndex() != a.getChunkIndex() + 1) {
+                        continue;
+                    }
+                    if (!expectedDocument.equals(a.getDocumentName())
+                            || !expectedDocument.equals(b.getDocumentName())) {
+                        continue;
+                    }
+                    String combined = normalize(combineAdjacent(a.getContent(), b.getContent()));
+                    if (combined.contains(expectedPhrase)) {
+                        return Math.min(i, j) + 1;
+                    }
+                }
+            }
+            return 0;
+        }
+
+        // 负例：期望文档为空时任何真实文档都不匹配 → 返回 0（未命中=正确）
         for (int i = 0; i < retrieved.size(); i++) {
-            Chunk chunk = retrieved.get(i);
-            if (expectedDocument.equals(chunk.getDocumentName())
-                    && normalize(chunk.getContent()).contains(expectedPhrase)) {
+            if (expectedDocument.equals(retrieved.get(i).getDocumentName())) {
                 return i + 1;
+            }
+        }
+        return 0;
+    }
+
+    /** 拼接两个相邻分块，去掉重叠前缀，还原边界处的连续文本。 */
+    private String combineAdjacent(String a, String b) {
+        int overlap = overlapLength(a, b);
+        return a + b.substring(overlap);
+    }
+
+    /** 返回 b 的前缀与 a 的后缀重合的最大字符数，用于去除分块重叠。 */
+    private int overlapLength(String a, String b) {
+        int max = Math.min(a.length(), b.length());
+        for (int k = max; k > 0; k--) {
+            if (a.endsWith(b.substring(0, k))) {
+                return k;
             }
         }
         return 0;
@@ -154,7 +210,7 @@ public class EvalService {
 
     /** 组装单题结果：名次、耗时与召回块精简视图。 */
     private CaseResult buildCaseResult(EvalCase evalCase, List<Chunk> retrieved,
-                                       int hitRank, double latencyMs) {
+                                       boolean hit, int hitRank, double latencyMs) {
         List<RetrievedChunk> chunkViews = new ArrayList<>(retrieved.size());
         for (Chunk chunk : retrieved) {
             RetrievedChunk view = new RetrievedChunk();
@@ -168,7 +224,7 @@ public class EvalService {
         CaseResult result = new CaseResult();
         result.setQuestion(evalCase.getQuestion());
         result.setType(evalCase.getType());
-        result.setHit(hitRank > 0);
+        result.setHit(hit);
         result.setHitRank(hitRank);
         result.setLatencyMs(round3(latencyMs));
         result.setRetrieved(chunkViews);

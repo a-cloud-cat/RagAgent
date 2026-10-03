@@ -1,6 +1,7 @@
 package com.example.rag.eval;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 检索评测报告：POST /eval/retrieval 的返回体。
@@ -42,6 +43,9 @@ public class EvalReport {
 
     /** 每题一条明细 */
     private List<CaseResult> cases;
+
+    /** 按题型聚合的统计（key 为题型名） */
+    private Map<String, TypeStats> byType;
 
     public int getTopK() {
         return topK;
@@ -139,6 +143,14 @@ public class EvalReport {
         this.cases = cases;
     }
 
+    public Map<String, TypeStats> getByType() {
+        return byType;
+    }
+
+    public void setByType(Map<String, TypeStats> byType) {
+        this.byType = byType;
+    }
+
     /**
      * 单题评测结果。
      */
@@ -146,6 +158,9 @@ public class EvalReport {
 
         /** 原题 */
         private String question;
+
+        /** 题型 */
+        private String type;
 
         /** topK 内是否命中期望分块 */
         private boolean hit;
@@ -165,6 +180,14 @@ public class EvalReport {
 
         public void setQuestion(String question) {
             this.question = question;
+        }
+
+        public String getType() {
+            return type;
+        }
+
+        public void setType(String type) {
+            this.type = type;
         }
 
         public boolean isHit() {
@@ -247,6 +270,67 @@ public class EvalReport {
 
         public void setSnippet(String snippet) {
             this.snippet = snippet;
+        }
+    }
+
+    /**
+     * 单个题型的聚合指标。
+     */
+    public static class TypeStats {
+
+        /** 该题型题数 */
+        private int count;
+
+        /** 命中题数 */
+        private int hits;
+
+        /** 命中率 hits / count（0~1） */
+        private double hitRate;
+
+        /** MRR：该题型所有题 1/hitRank 的均值（未命中按 0 计） */
+        private double mrr;
+
+        /** 平均命中名次（仅统计命中题；无命中时为 0） */
+        private double avgRank;
+
+        public int getCount() {
+            return count;
+        }
+
+        public void setCount(int count) {
+            this.count = count;
+        }
+
+        public int getHits() {
+            return hits;
+        }
+
+        public void setHits(int hits) {
+            this.hits = hits;
+        }
+
+        public double getHitRate() {
+            return hitRate;
+        }
+
+        public void setHitRate(double hitRate) {
+            this.hitRate = hitRate;
+        }
+
+        public double getMrr() {
+            return mrr;
+        }
+
+        public void setMrr(double mrr) {
+            this.mrr = mrr;
+        }
+
+        public double getAvgRank() {
+            return avgRank;
+        }
+
+        public void setAvgRank(double avgRank) {
+            this.avgRank = avgRank;
         }
     }
 }

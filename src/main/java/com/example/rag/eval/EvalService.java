@@ -3,7 +3,9 @@ package com.example.rag.eval;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
@@ -13,6 +15,7 @@ import com.example.rag.config.RerankProperties;
 import com.example.rag.config.RetrievalProperties;
 import com.example.rag.eval.EvalReport.CaseResult;
 import com.example.rag.eval.EvalReport.RetrievedChunk;
+import com.example.rag.eval.EvalReport.TypeStats;
 import com.example.rag.model.Chunk;
 import com.example.rag.service.RetrievalService;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -102,7 +105,33 @@ public class EvalService {
         report.setRerankEnabled(rerankProperties.isEnabled());
         report.setRerankModel(rerankProperties.isEnabled() ? rerankProperties.getModel() : null);
         report.setCases(results);
+        report.setByType(aggregateByType(results));
         return report;
+    }
+
+    /** 按题型聚合：用 LinkedHashMap 保留题型在评测集中首次出现的顺序。 */
+    private Map<String, TypeStats> aggregateByType(List<CaseResult> results) {
+        Map<String, TypeStats> byType = new LinkedHashMap<>();
+        for (CaseResult result : results) {
+            byType.computeIfAbsent(result.getType(), k -> new TypeStats());
+        }
+        for (CaseResult result : results) {
+            TypeStats stats = byType.get(result.getType());
+            stats.setCount(stats.getCount() + 1);
+            if (result.isHit()) {
+                stats.setHits(stats.getHits() + 1);
+                stats.setAvgRank(stats.getAvgRank() + result.getHitRank());
+            }
+            stats.setMrr(stats.getMrr() + (result.getHitRank() > 0 ? 1.0 / result.getHitRank() : 0));
+        }
+        for (TypeStats stats : byType.values()) {
+            int count = stats.getCount();
+            int hits = stats.getHits();
+            stats.setHitRate(count == 0 ? 0 : round3((double) hits / count));
+            stats.setMrr(count == 0 ? 0 : round3(stats.getMrr() / count));
+            stats.setAvgRank(hits == 0 ? 0 : round3(stats.getAvgRank() / hits));
+        }
+        return byType;
     }
 
     /**
@@ -138,6 +167,7 @@ public class EvalService {
 
         CaseResult result = new CaseResult();
         result.setQuestion(evalCase.getQuestion());
+        result.setType(evalCase.getType());
         result.setHit(hitRank > 0);
         result.setHitRank(hitRank);
         result.setLatencyMs(round3(latencyMs));
@@ -168,8 +198,16 @@ public class EvalService {
     /** 从 classpath 读取并解析评测集。 */
     private List<EvalCase> loadCases() {
         try (InputStream in = new ClassPathResource(CASES_RESOURCE).getInputStream()) {
-            return objectMapper.readValue(in, new TypeReference<List<EvalCase>>() {
+            List<EvalCase> cases = objectMapper.readValue(in, new TypeReference<List<EvalCase>>() {
             });
+            for (int i = 0; i < cases.size(); i++) {
+                String type = cases.get(i).getType();
+                if (type == null || type.isBlank()) {
+                    throw new IllegalStateException(
+                            "评测集第 " + (i + 1) + " 题缺少 type 字段：" + cases.get(i).getQuestion());
+                }
+            }
+            return cases;
         } catch (IOException e) {
             throw new IllegalStateException("评测集加载失败：" + CASES_RESOURCE, e);
         }

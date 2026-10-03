@@ -14,6 +14,9 @@ public class EvalCase {
     /** 期望分块必须包含的短语 */
     private String expectedPhrase;
 
+    /** 题型：精确术语 / 语义改写 / 跨块 / 知识库外，用于分题型统计 */
+    private String type;
+
     public String getQuestion() {
         return question;
     }
@@ -36,5 +39,13 @@ public class EvalCase {
 
     public void setExpectedPhrase(String expectedPhrase) {
         this.expectedPhrase = expectedPhrase;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
     }
 }

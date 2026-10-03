@@ -1,0 +1,13 @@
+Java Web 服务器与容器笔记
+
+一、Servlet 容器的职责
+Servlet 容器负责监听端口、解析 HTTP 请求、把请求分发给对应的 Servlet，并管理会话与线程池。传统的 Java Web 开发把应用打成 WAR 包，部署到独立安装的 Tomcat、Jetty 或 WebLogic 中；容器与应用分离，运维需要单独维护服务器版本和配置。
+
+二、内嵌容器的兴起
+微服务流行之后，内嵌容器成为主流：服务器以依赖包的形式存在，应用自身包含容器，打成单个可执行 JAR，命令行直接启动。这样做的好处是环境一致、交付物只有一个文件，容器版本随应用一起升级。spring-boot-starter-web 默认选择的是内嵌 Tomcat，因为它生态最成熟、文档最全。如果想换容器，排除 Tomcat 依赖后引入 spring-boot-starter-jetty 或 spring-boot-starter-undertow 即可。Undertow 以低内存占用和高并发著称，Jetty 则在长连接场景有优势。
+
+三、Tomcat 的线程模型
+Tomcat 默认使用 NIO 连接器，每个请求占用一个工作线程直到响应写完。这种"每连接一线程"的模型在慢客户端较多的场景容易耗尽线程池，可以通过调整 maxThreads 缓解，但治本的办法是减少阻塞调用。
+
+四、响应式与 WebClient
+Spring WebFlux 提供另一种模型：基于事件循环的非阻塞 IO，少量线程即可支撑大量并发连接。即使应用跑在传统的 Tomcat 上，也可以单独引入 WebFlux 包里的 WebClient 来发起出站 HTTP 调用——它支持流式收发，比如订阅服务端的 SSE 事件流并逐条处理，不需要把整个响应体缓冲到内存。WebClient 通过 exchange 方法拿到响应后可以用 flatMap 转成 Flux 持续消费。

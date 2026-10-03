@@ -1,0 +1,13 @@
+Spring Boot 2.x 遗留系统笔记
+
+一、旧版自动配置注册机制
+在 Spring Boot 2.7 之前，第三方 starter 的自动配置类通过 META-INF/spring.factories 文件注册：在 EnableAutoConfiguration 键下列出所有候选配置类，启动时统一加载再按条件过滤。这个机制的问题是无论条件是否满足，所有类名都会被读进内存。从 2.7 开始引入了新的注册方式，3.x 则彻底移除了 spring.factories 对自动配置的支持，迁移到新的清单文件格式。维护老项目升级时要注意：只改依赖版本而不迁移清单文件，自动配置会静默失效，表现为 Bean 找不到或配置不生效。
+
+二、条件装配注解
+自动配置类大量使用条件注解决定生效时机：@ConditionalOnClass 表示类路径存在指定类才装配；@ConditionalOnMissingBean 表示容器中没有同类型 Bean 时才生效，给用户自定义实现让路；@ConditionalOnProperty 按配置项开关。排查"配置为什么没生效"时，可以在启动参数加 debug 标志，让条件评估报告打印每个配置类的匹配结果。
+
+三、配置文件的组织
+老项目常见 application.properties，新项目多用 YAML。多环境配置用 spring.profiles.active 指定激活的环境，配置文件按 application-环境名 拆分。占位符 ${VAR:default} 可以在配置值里引用环境变量并给默认值，容器化部署时特别有用。需要注意 2.4 版本对配置加载顺序做过一次大调整，spring.profiles 直接写在 application.yaml 里的旧写法会报错，必须改用 spring.config.activate.on-profile。
+
+四、起步依赖的管理
+starter 本质是打包好的一组依赖坐标加自动配置。父 POM 统一管理依赖版本，引入 starter 时不写版本号。排查依赖冲突时先用 dependency:tree 看传递依赖，再用 exclusions 排除冲突项。

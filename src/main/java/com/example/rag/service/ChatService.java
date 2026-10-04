@@ -35,6 +35,9 @@ public class ChatService {
             参考资料：
             %s""";
 
+    /** 证据闸门拦截时的固定回复，不经过 LLM，保证措辞逐字确定 */
+    private static final String REFUSAL = "根据现有资料无法回答这个问题。";
+
     private final WebClient webClient;
 
     private final LlmProperties llmProperties;
@@ -51,13 +54,14 @@ public class ChatService {
 
     public void streamChat(String question, SseEmitter emitter, boolean skipRetrieval) {
         List<Chunk> retrieved = List.of();
+        RetrievalOutcome outcome = null;
 
         if (skipRetrieval) {
             log.info("用户已确认知识库不可用，跳过检索，按普通对话处理");
         } else {
             try {
-                // 检索链路：向量化 → 候选召回 → Rerank → 截 topK
-                retrieved = retrievalService.retrieve(question);
+                // 检索链路：向量化 → 候选召回 → Rerank → 截 topK → 证据闸门
+                outcome = retrievalService.retrieve(question);
             } catch (Exception e) {
                 // 请求中途才暴露的故障（DB 断开、embedding 失败）：通知前端后降级为裸 LLM
                 log.error("检索链路失败，降级为普通对话", e);
@@ -70,6 +74,16 @@ public class ChatService {
                     emitter.completeWithError(ioe);
                     return;
                 }
+            }
+        }
+
+        if (outcome != null) {
+            retrieved = outcome.getChunks();
+            if (!outcome.isEvidenceReady()) {
+                log.info("证据闸门拦截，固定拒答：top1={}",
+                        String.format("%.3f", outcome.getTop1Score()));
+                refuse(emitter);
+                return;
             }
         }
 
@@ -141,6 +155,19 @@ public class ChatService {
             log.debug("SSE 异步错误回调：{}", e.toString());
             subscription.dispose();
         });
+    }
+
+    /** 闸门拦截：按上游同款 OpenAI SSE 协议吐一条固定文本后收尾，前端无需感知闸门。 */
+    private void refuse(SseEmitter emitter) {
+        try {
+            emitter.send(Map.of("choices", List.of(
+                    Map.of("delta", Map.of("content", REFUSAL)))));
+            emitter.send("[DONE]");
+            emitter.complete();
+        } catch (IOException e) {
+            log.warn("拒答消息发送失败，客户端可能已断开", e);
+            emitter.completeWithError(e);
+        }
     }
 
     /** 把召回分块编号拼接成参考资料文本。 */

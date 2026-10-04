@@ -17,6 +17,7 @@ import com.example.rag.eval.EvalReport.CaseResult;
 import com.example.rag.eval.EvalReport.RetrievedChunk;
 import com.example.rag.eval.EvalReport.TypeStats;
 import com.example.rag.model.Chunk;
+import com.example.rag.service.RetrievalOutcome;
 import com.example.rag.service.RetrievalService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -69,41 +70,57 @@ public class EvalService {
 
         List<CaseResult> results = new ArrayList<>(cases.size());
         int hits = 0;
+        int positiveCount = 0;
+        int negativeCorrect = 0;
         double scoreSum = 0;
         double latencySum = 0;
         double mrrSum = 0;
 
         for (EvalCase evalCase : cases) {
             long start = System.nanoTime();
-            List<Chunk> retrieved = retrievalService.retrieve(evalCase.getQuestion());
+            RetrievalOutcome outcome = retrievalService.retrieve(evalCase.getQuestion());
+            List<Chunk> retrieved = outcome.getChunks();
             double latencyMs = (System.nanoTime() - start) / 1_000_000.0;
 
             int hitRank = findHitRank(evalCase, retrieved);
             boolean negative = normalize(evalCase.getExpectedPhrase()).isEmpty();
-            // 负例：未命中（hitRank==0）才算正确；正例：命中（hitRank>0）才算正确
-            boolean hit = negative ? hitRank == 0 : hitRank > 0;
-            // 负例正确时展示为名次 1（MRR 贡献 1.0），失败为 0
-            int displayRank = negative ? (hit ? 1 : 0) : hitRank;
+            // 正例：答案块在 topK 内且闸门放行才算正确；负例：闸门拦截拒答才算正确
+            boolean hit;
+            if (negative) {
+                hit = !outcome.isEvidenceReady();
+                if (hit) {
+                    negativeCorrect++;
+                }
+            } else {
+                positiveCount++;
+                hit = hitRank > 0 && outcome.isEvidenceReady();
+                if (hit) {
+                    mrrSum += 1.0 / hitRank;
+                }
+            }
 
             if (hit) {
                 hits++;
-                mrrSum += displayRank > 0 ? 1.0 / displayRank : 0;
             }
             if (!retrieved.isEmpty()) {
                 scoreSum += retrieved.get(0).getScore();
             }
             latencySum += latencyMs;
 
-            results.add(buildCaseResult(evalCase, retrieved, hit, displayRank, latencyMs));
+            results.add(buildCaseResult(evalCase, outcome, hit, hitRank, !negative, latencyMs));
         }
 
         int total = cases.size();
+        int negativeCount = total - positiveCount;
         EvalReport report = new EvalReport();
         report.setTopK(topK);
         report.setTotal(total);
         report.setHits(hits);
         report.setHitRate(total == 0 ? 0 : round3((double) hits / total));
-        report.setMrr(total == 0 ? 0 : round3(mrrSum / total));
+        report.setAnswerable(positiveCount);
+        report.setMrr(positiveCount == 0 ? 0 : round3(mrrSum / positiveCount));
+        report.setRejectionRate(negativeCount == 0 ? 0
+                : round3((double) negativeCorrect / negativeCount));
         report.setAvgScore(total == 0 ? 0 : round3(scoreSum / total));
         report.setAvgLatencyMs(total == 0 ? 0 : round3(latencySum / total));
         report.setChunkSize(CHUNK_SIZE_DESC);
@@ -115,7 +132,7 @@ public class EvalService {
         return report;
     }
 
-    /** 按题型聚合：用 LinkedHashMap 保留题型在评测集中首次出现的顺序。 */
+    /** 按题型聚合：用 LinkedHashMap 保留题型在评测集中首次出现的顺序。MRR 分母只计正例。 */
     private Map<String, TypeStats> aggregateByType(List<CaseResult> results) {
         Map<String, TypeStats> byType = new LinkedHashMap<>();
         for (CaseResult result : results) {
@@ -128,13 +145,18 @@ public class EvalService {
                 stats.setHits(stats.getHits() + 1);
                 stats.setAvgRank(stats.getAvgRank() + result.getHitRank());
             }
-            stats.setMrr(stats.getMrr() + (result.getHitRank() > 0 ? 1.0 / result.getHitRank() : 0));
+            if (result.isAnswerable()) {
+                stats.setMrrCount(stats.getMrrCount() + 1);
+                if (result.isHit()) {
+                    stats.setMrr(stats.getMrr() + 1.0 / result.getHitRank());
+                }
+            }
         }
         for (TypeStats stats : byType.values()) {
             int count = stats.getCount();
             int hits = stats.getHits();
             stats.setHitRate(count == 0 ? 0 : round3((double) hits / count));
-            stats.setMrr(count == 0 ? 0 : round3(stats.getMrr() / count));
+            stats.setMrr(stats.getMrrCount() == 0 ? 0 : round3(stats.getMrr() / stats.getMrrCount()));
             stats.setAvgRank(hits == 0 ? 0 : round3(stats.getAvgRank() / hits));
         }
         return byType;
@@ -208,9 +230,10 @@ public class EvalService {
         return 0;
     }
 
-    /** 组装单题结果：名次、耗时与召回块精简视图。 */
-    private CaseResult buildCaseResult(EvalCase evalCase, List<Chunk> retrieved,
-                                       boolean hit, int hitRank, double latencyMs) {
+    /** 组装单题结果：名次、闸门判定、耗时与召回块精简视图。 */
+    private CaseResult buildCaseResult(EvalCase evalCase, RetrievalOutcome outcome,
+                                       boolean hit, int hitRank, boolean answerable, double latencyMs) {
+        List<Chunk> retrieved = outcome.getChunks();
         List<RetrievedChunk> chunkViews = new ArrayList<>(retrieved.size());
         for (Chunk chunk : retrieved) {
             RetrievedChunk view = new RetrievedChunk();
@@ -226,6 +249,9 @@ public class EvalService {
         result.setType(evalCase.getType());
         result.setHit(hit);
         result.setHitRank(hitRank);
+        result.setAnswerable(answerable);
+        result.setEvidenceReady(outcome.isEvidenceReady());
+        result.setTop1Score(round3(outcome.getTop1Score()));
         result.setLatencyMs(round3(latencyMs));
         result.setRetrieved(chunkViews);
         return result;

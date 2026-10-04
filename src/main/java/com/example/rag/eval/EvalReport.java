@@ -14,14 +14,20 @@ public class EvalReport {
     /** 总题数 */
     private int total;
 
-    /** 命中题数 */
+    /** 判定正确题数（正例命中且闸门放行，或负例被闸门拦截） */
     private int hits;
 
-    /** 命中率 hits / total（0~1） */
+    /** 正确率 hits / total（0~1） */
     private double hitRate;
 
-    /** MRR：所有题 1/hitRank 的均值（未命中按 0 计） */
+    /** 正例题数（MRR 的分母；负例无排序概念，不计入 MRR） */
+    private int answerable;
+
+    /** MRR：正例题 1/hitRank 的均值，未命中或闸门拦截按 0 计 */
     private double mrr;
+
+    /** 拒答正确率：负例题被证据闸门正确拦截的比例（0~1） */
+    private double rejectionRate;
 
     /** 每题第 1 名召回分块相似度的均值 */
     private double avgScore;
@@ -79,12 +85,28 @@ public class EvalReport {
         this.hitRate = hitRate;
     }
 
+    public int getAnswerable() {
+        return answerable;
+    }
+
+    public void setAnswerable(int answerable) {
+        this.answerable = answerable;
+    }
+
     public double getMrr() {
         return mrr;
     }
 
     public void setMrr(double mrr) {
         this.mrr = mrr;
+    }
+
+    public double getRejectionRate() {
+        return rejectionRate;
+    }
+
+    public void setRejectionRate(double rejectionRate) {
+        this.rejectionRate = rejectionRate;
     }
 
     public double getAvgScore() {
@@ -162,11 +184,20 @@ public class EvalReport {
         /** 题型 */
         private String type;
 
-        /** topK 内是否命中期望分块 */
+        /** 判定是否正确（正例命中且放行 / 负例被拦截） */
         private boolean hit;
 
         /** 命中位置（1 起算；未命中为 0） */
         private int hitRank;
+
+        /** 是否正例（库中存在答案；false 为知识库外负例） */
+        private boolean answerable;
+
+        /** 证据闸门是否放行 */
+        private boolean evidenceReady;
+
+        /** rerank 后第 1 名的相关性分数 */
+        private double top1Score;
 
         /** 本题「向量化 + 检索」耗时（毫秒） */
         private double latencyMs;
@@ -204,6 +235,30 @@ public class EvalReport {
 
         public void setHitRank(int hitRank) {
             this.hitRank = hitRank;
+        }
+
+        public boolean isAnswerable() {
+            return answerable;
+        }
+
+        public void setAnswerable(boolean answerable) {
+            this.answerable = answerable;
+        }
+
+        public boolean isEvidenceReady() {
+            return evidenceReady;
+        }
+
+        public void setEvidenceReady(boolean evidenceReady) {
+            this.evidenceReady = evidenceReady;
+        }
+
+        public double getTop1Score() {
+            return top1Score;
+        }
+
+        public void setTop1Score(double top1Score) {
+            this.top1Score = top1Score;
         }
 
         public double getLatencyMs() {
@@ -281,13 +336,16 @@ public class EvalReport {
         /** 该题型题数 */
         private int count;
 
-        /** 命中题数 */
+        /** 判定正确题数 */
         private int hits;
 
-        /** 命中率 hits / count（0~1） */
+        /** 正确率 hits / count（0~1） */
         private double hitRate;
 
-        /** MRR：该题型所有题 1/hitRank 的均值（未命中按 0 计） */
+        /** 正例题数（MRR 分母；知识库外题型为 0，MRR 不适用） */
+        private int mrrCount;
+
+        /** MRR：正例题 1/hitRank 的均值（未命中或闸门拦截按 0 计） */
         private double mrr;
 
         /** 平均命中名次（仅统计命中题；无命中时为 0） */
@@ -315,6 +373,14 @@ public class EvalReport {
 
         public void setHitRate(double hitRate) {
             this.hitRate = hitRate;
+        }
+
+        public int getMrrCount() {
+            return mrrCount;
+        }
+
+        public void setMrrCount(int mrrCount) {
+            this.mrrCount = mrrCount;
         }
 
         public double getMrr() {

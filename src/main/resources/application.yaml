@@ -26,8 +26,9 @@ rag:
   retrieval:
     top-k: 3              # 最终送入 LLM 的分块条数
     candidate-limit: 20   # 送 Rerank 精排的候选池大小（必须 ≥ top-k）
+    evidence-threshold: 0.48  # 证据闸门：rerank top1 相关性低于此值按无证据拒答（标定：11 正例最低 0.680、4 负例最高 0.276 的中点）
   rerank:
-    enabled: false        # 关闭时 NoopRerankClient 原样透传；开启时调百炼 qwen3-rerank
+    enabled: true         # 关闭时 NoopRerankClient 原样透传；开启时调百炼 qwen3-rerank
     model: qwen3-rerank
     base-url: https://dashscope.aliyuncs.com
     api-key: ${DASHSCOPE_API_KEY:}

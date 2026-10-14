@@ -28,10 +28,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @Service
 public class EvalService {
 
-    /** 评测集在 classpath 下的位置 */
     private static final String CASES_RESOURCE = "eval/retrieval-cases.json";
 
-    /** 报告中分块摘要截取的字符数 */
     private static final int SNIPPET_LENGTH = 80;
 
     /** 与 TextChunker 常量保持一致，仅用于在报告中记录评测时的切块参数 */

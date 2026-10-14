@@ -3,7 +3,7 @@ package com.example.rag.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 
-@ConfigurationProperties(prefix = "llm")
+@ConfigurationProperties(prefix = "rag.llm")
 public class LlmProperties {
 
     private String baseUrl;

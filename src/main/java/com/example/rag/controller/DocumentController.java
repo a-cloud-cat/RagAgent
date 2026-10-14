@@ -21,7 +21,6 @@ import com.example.rag.service.IngestionService;
 @RequestMapping("/documents")
 public class DocumentController {
 
-    /** 当前接口承诺支持的文件后缀白名单 */
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of(".txt", ".pdf", ".html", ".htm");
 
     private final IngestionService ingestionService;
@@ -54,7 +53,6 @@ public class DocumentController {
         String text = lowerName.endsWith(".txt")
                 ? new String(file.getBytes(), StandardCharsets.UTF_8)
                 : documentParser.parse(file.getInputStream());
-        //id是数据库自动生成的自增主键
         Long documentId = ingestionService.ingest(filename, text);
 
         return Map.of("id", documentId, "name", filename, "status", "INGESTED");

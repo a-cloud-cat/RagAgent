@@ -8,10 +8,8 @@ import java.util.Map;
  */
 public class EvalReport {
 
-    /** 本次检索使用的 topK */
     private int topK;
 
-    /** 总题数 */
     private int total;
 
     /** 判定正确题数（正例命中且闸门放行，或负例被闸门拦截） */
@@ -38,19 +36,16 @@ public class EvalReport {
     /** 评测时的切块参数，如 "300/50" */
     private String chunkSize;
 
-    /** 评测时的向量模型名 */
     private String embeddingModel;
 
-    /** 评测时是否启用 Rerank */
     private boolean rerankEnabled;
 
-    /** 评测时的 rerank 模型名（未启用时为 null） */
+    /** 未启用 Rerank 时为 null */
     private String rerankModel;
 
-    /** 每题一条明细 */
     private List<CaseResult> cases;
 
-    /** 按题型聚合的统计（key 为题型名） */
+    /** key 为题型名 */
     private Map<String, TypeStats> byType;
 
     public int getTopK() {
@@ -173,15 +168,10 @@ public class EvalReport {
         this.byType = byType;
     }
 
-    /**
-     * 单题评测结果。
-     */
     public static class CaseResult {
 
-        /** 原题 */
         private String question;
 
-        /** 题型 */
         private String type;
 
         /** 判定是否正确（正例命中且放行 / 负例被拦截） */
@@ -193,7 +183,6 @@ public class EvalReport {
         /** 是否正例（库中存在答案；false 为知识库外负例） */
         private boolean answerable;
 
-        /** 证据闸门是否放行 */
         private boolean evidenceReady;
 
         /** rerank 后第 1 名的相关性分数 */
@@ -283,16 +272,14 @@ public class EvalReport {
      */
     public static class RetrievedChunk {
 
-        /** 所属文档名 */
         private String document;
 
-        /** 文档内分块序号 */
         private int chunkIndex;
 
-        /** 相似度得分（越大越相似） */
+        /** 越大越相似 */
         private double score;
 
-        /** 分块内容前若干字，供人工核对 */
+        /** 分块内容前若干字 */
         private String snippet;
 
         public String getDocument() {
@@ -328,15 +315,10 @@ public class EvalReport {
         }
     }
 
-    /**
-     * 单个题型的聚合指标。
-     */
     public static class TypeStats {
 
-        /** 该题型题数 */
         private int count;
 
-        /** 判定正确题数 */
         private int hits;
 
         /** 正确率 hits / count（0~1） */

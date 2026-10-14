@@ -12,10 +12,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class TextChunker {
 
-    /** 每块最大字符数 */
     private static final int CHUNK_SIZE = 300;
 
-    /** 相邻块重叠字符数 */
     private static final int OVERLAP_SIZE = 50;
 
     /**

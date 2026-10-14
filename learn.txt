@@ -1,0 +1,371 @@
+========== samples/ ==========
+
+Q（1）[samples/]：samples 里的样本文档为什么按文件分类（如 spring-framework-notes.txt、
+spring-boot-notes.txt），而不是把所有 Spring 知识放进一个文件？
+最终不都存进 pg 同一张表吗？有什么区别？
+
+A：
+1. 分块边界不同：每个文件单独调 TextChunker.split，文件末尾被切断，
+   不会跨文件产生混合块。合并成大文件后，滑动窗口会在文件拼接处产生
+   主题无关的混合块（如 AOP 段落 + 「约定优于配置」挤进同一块），
+   稀释语义、降低检索质量。这是最关键的区别。
+
+2. documentName 元数据不同：每个 chunk 带着所属文件名（search 的 SQL
+   JOIN t_document 带出）。评测时 findHitRank 要求「文档名精确相等
+   且内容命中」才算正确。合并后所有 chunk 同名，失去「答案必须来自
+   正确文档」的校验维度。
+
+3. 更新粒度不同：分文件时只需重传变更的那个文件，只影响该文档的 chunks；
+   合并后改一个字就要重传整个大文件，所有 chunks 重建、document_id
+   重绑定，旧引用全部失效。
+
+4. 当前 search 的 WHERE 只过滤 deleted=0，没有按 document_id 过滤，
+   所以对问答效果的实际影响主要在第 1 点；但表结构和 documentName
+   字段已预留按文档过滤能力，将来加「只在某文档内搜索」时直接能用。
+
+一句话：合并进同一张表的是 chunk，不是 document。文件边界在这个系统
+里有语义——决定切块在哪断开、每个 chunk 带哪个 documentName、更新时
+影响多大。
+
+
+========== application.yaml 系列 ==========
+
+Q（3）[application.yaml 系列]：为什么不直接写 Java 里？为什么有三个 yaml？
+
+A：配置与代码分离：环境不同值不同，且 api-key 是密钥不能进 git，抽成
+yaml 改配置不用重编译。三个 yaml 是 profile 机制：application.yaml
+是共享基础，cloud/local 是环境覆盖；spring.profiles.active 决定加载
+哪个，运行时只合并成一份。
+
+
+========== EmbeddingProperties.java ==========
+
+Q（2）[EmbeddingProperties.java]：@ConfigurationProperties(prefix="rag.embedding") 配置值放哪？
+是启动时全局配置吗？
+
+A：值在 application.yaml 的 rag.embedding.* 下。注解只声明绑定规则，
+真正注册靠 RagApplication 上的 @EnableConfigurationProperties。启动时
+Spring 读 yaml、调 setter 填充，生成单例 Bean 供注入。三层缺一不可：
+声明牌（注解）→ 注册开关（EnableConfigurationProperties）→ 实际值
+（yaml）。
+
+
+========== LlmProperties.java ==========
+
+Q（4）[RerankProperties.java / LlmProperties.java]：前缀为什么是 rag.rerank 而不是 rerank？llm 为什么又不加 rag.？
+
+A：rag. 是项目命名空间，避免与 Spring 内置/第三方库配置撞名，也方便
+区分项目自有配置。llm 原本漏了 rag. 前缀（命名不一致），已统一改为
+rag.llm.*，同步改了 LlmProperties 注解 + cloud/local 两个 yaml。
+
+
+========== RerankProperties.java ==========
+
+（见 Q4）
+
+
+========== RetrievalProperties.java ==========
+
+Q（5）[RetrievalProperties.java]：@PostConstruct 是什么？validate() 为什么不写访问修饰符？
+为什么直接 throw 不用 try-catch 或 print？Java 访问修饰符有几级？
+
+A：@PostConstruct 标记的方法在 Bean 创建+依赖注入完成后自动调用，
+这里用于启动时配置校验。不写 public/private 是包级私有，Spring 用
+反射调用不看权限，且该方法只给容器用不对外暴露。直接 throw 是
+fail-fast：配置错误时让应用启动失败并立刻报错，比 try-catch 吞掉
+异常带病运行、或 print 只打日志继续跑更安全。
+
+Java 访问修饰符从宽到严：public > protected（同包 + 子类） > 默认（包级，不写）>
+private（仅本类）。默认和 private 之间没有其他等级；validate() 选默认是为了
+同包测试类可直接调用，又比 public 封装。
+
+
+========== WebClientConfig.java ==========
+
+Q（6）[LlmProperties.java / WebClientConfig.java]：@ConfigurationProperties 和 @Configuration 什么关系？没有前者
+就得加后者吗？
+
+A：两者无关，不是二选一。@ConfigurationProperties 是把 yaml 值绑到类
+字段（LlmProperties 等）；@Configuration 是标记类里有 @Bean 方法、
+Spring 要解析它注册 Bean（WebClientConfig）。可同时有、可只一个、
+可都没有。@ConfigurationProperties 类通过启动类的 @EnableConfigura
+tionProperties 注册，不需要 @Configuration。
+
+
+Q（8）[RerankClient.java / WebClientConfig.java]：方法有 3 个参数却返回 List，参数和返回值数量有关系吗？
+WebClient.Builder 的 build() 是链式调用吗？
+
+A：参数是输入、返回值是输出，数量无对应关系。rerank 固定传 3 个
+参数（query/candidates/topN），返回重排后的 List<Chunk>，列表长度
+由 topN 决定。WebClient.Builder 是构造器模式：Spring 传入预配置好
+的 builder，调 .build() 产出 WebClient 实例。本项目没有自定义配置，
+只调一次 .build()；要自定义时才链式 .baseUrl(...).build()。
+
+
+========== RerankClient.java ==========
+
+Q（7）[RerankClient.java]：RerankClient 接口里的方法为什么没有方法体？@param/@return
+是接口才需要吗？
+
+A：接口（interface）的方法只声明签名、没有 {} 方法体，以分号结尾；
+方法体由实现类（BaiLianRerankClient/NoopRerankClient）提供，这是
+面向接口编程。@param/@return 是 Javadoc 文档标签，普通类方法也能写，
+和接口无关，只是作者顺手加的文档。
+
+
+（见 Q8）
+
+
+========== ChatController.java ==========
+
+Q（9）[ChatController.java]：@PostMapping 和 @GetMapping 是什么？POST 是前端传后端、
+GET 是后端传前端吗？
+
+A：不是方向区别，两者都是前端发请求→后端处理→返回响应。区别是
+HTTP 方法：@GetMapping 处理 GET（参数放 URL ?key=value，用于查
+询），@PostMapping 处理 POST（参数放请求体 Body，用于提交）。
+本项目用 POST 是因为要传 JSON 对象 {question, skipRetrieval}，
+@RequestBody 把请求体 JSON 反序列化成 ChatRequest 对象。返回的
+SseEmitter 由 Spring 作为响应推给前端。
+
+
+========== DocumentController.java ==========
+
+Q（10）[DocumentController.java]：Set<String> 和 Set.of(...) 是什么？字段加 final 是为了什么？
+「接口」注释和 interface 是一回事吗？
+
+A：Set<String> 是不重复、无序的字符串集合；Set.of(...) 是 Java 9+
+快速创建不可变 Set 的工厂方法。白名单用 Set 是因为 contains 判断
+O(1)，比 List 的 O(n) 快，且语义正确。
+
+final 字段表示只能赋值一次、之后不能改。documentParser 是 Spring
+启动时通过构造器注入一次的无状态工具，所有请求复用同一实例；加
+final 是防止引用被意外改掉，不是为了避免频繁传递。
+
+
+Q（11）[DocumentController.java]：@RequestMapping 和 @PostMapping
+是联合用的吗？throws IOException 是什么？受检/非受检异常区别？
+
+A：@RequestMapping("/documents") 是类级基础路径，@PostMapping 是
+方法级 HTTP 方法，合起来 POST /documents → upload()。标注后 Spring
+自动注册路由，前端发对应请求就调该方法。
+
+throws IOException 是声明受检异常抛给上层。受检异常（如 IOException）
+编译器强制要求 try-catch 或 throws，否则编译报错；非受检异常
+（RuntimeException 子类如 IllegalStateException）编译器不检查，可
+直接 throw 不管，但运行时抛了仍会往上冒直到被 catch 或崩溃。
+
+
+Q（12）[DocumentController.java]：ingest() 为什么能返回自增主键？
+new String(file.getBytes(), UTF_8) 里的 new 是什么？
+
+A：ingest() 内部调 DocumentRepository.insert()，后者用 Spring 的
+KeyHolder 接住 INSERT 后数据库自增生成的主键并返回，所以 Controller
+能拿到 documentId。
+
+String 是类（引用类型），不是基本类型。file.getBytes() 返回 byte[]
+（原始字节），new String(byte[], Charset) 是 String 的构造器，把字
+节数组按 UTF-8 解码成字符串。字面量 "xxx" 用于写死的字符串，从字节
+动态构造必须用 new。
+
+
+========== GlobalExceptionHandler.java ==========
+
+Q（13）[GlobalExceptionHandler.java]：@RestControllerAdvice、
+@ExceptionHandler、@ResponseStatus 分别干嘛？为什么两个方法？
+
+A：@RestControllerAdvice 标在类上，声明这是全局异常拦截器，所有
+Controller 抛的异常都来这处理，返回值自动转 JSON。
+
+@ExceptionHandler(异常类型.class) 标在方法上，声明该方法处理哪种异常。
+@ResponseStatus(HttpStatus.XXX) 标在方法上，声明处理完返回什么 HTTP
+状态码。两个方法对应两种异常：IllegalArgumentException → 400（客户端
+参数错），IllegalStateException → 500（服务端内部错）。未处理的异常
+走 Spring 默认 500。
+
+
+========== HealthController.java ==========
+
+Q（14）[HealthController.java]：健康检查接口为什么恒返回 200？
+为什么不用 @PostConstruct？后端挂了返回 500 吗？
+
+A：GET /health/retrieval 执行 SELECT 1 探测数据库，返回
+{"retrievalReady": true/false}。恒返回 200 是为了区分两种失败：
+后端进程挂了 → 无响应（超时/拒绝连接，没有状态码）；后端活着但
+数据库挂了 → 200 + retrievalReady:false。如果数据库挂了返 500，
+就和其他后端 bug 的 500 混在一起，无法定位是数据库问题。
+
+不用 @PostConstruct 是因为它只在启动时执行一次，无法实时反映数据
+库状态；健康检查必须每次请求都重新探测。
+
+注：后端挂了不是 500，500 是后端收到请求但处理出错才返回的。
+
+
+========== EmbeddingData.java ==========
+
+Q（15）[EmbeddingData.java]：record 是什么？括号里的参数是什么？
+没有 setter 谁传值？
+
+A：record 是 Java 16+ 的记录类，专写纯数据 DTO。括号里写的
+是字段声明（int index, float[] embedding），编译器自动生成：
+构造方法、getter（方法名=字段名，如 index() 而非 getIndex()）、
+equals/hashCode/toString。字段强制 final，所以没有 setter。
+
+值在创建对象时通过构造方法传入，本项目由 Jackson 把 API 返回
+的 JSON 自动反序列化成 EmbeddingData 对象时传入。
+
+
+========== OpenAiEmbeddingClient.java / EmbeddingClient.java ==========
+
+Q（16）[OpenAiEmbeddingClient.java / EmbeddingClient.java]：
+Logger 为啥 static final？
+为啥不放 IOC 容器？SLF4J 是啥？Javadoc 注释放哪？
+
+A：
+1. 百炼 = 阿里云大模型平台。OpenAI 兼容协议 = API 格式照搬
+   OpenAI 规范（URL/请求体/响应体一致），改 URL 和 key 就能
+   复用 OpenAI 客户端代码。所以类名叫 OpenAiEmbeddingClient。
+
+2. private static final Logger log = LoggerFactory.getLogger(
+   OpenAiEmbeddingClient.class)：调用 SLF4J 工厂拿一个 logger，
+   传当前类的 Class 当 logger 名字，日志输出会带类名方便定位。
+   static = 类级别共享一个实例；final = 引用不可重新赋值。
+   「只能打一条」是误解：log.debug() 调多少次都行，每次产生一条。
+
+3. 不放 IOC 容器：Logger 不是业务 Bean，无状态无依赖无生命周期，
+   放 IOC 要 @Component + 注入 + 每个类 @Autowired，比静态字段
+   麻烦十倍且零好处。SLF4J 设计哲学就是每类静态持有 logger。
+
+4. 一个类一个 logger（不是浪费）：每个 logger 名字=类全限定名，
+   底层是同一个 Logback 实现，但能按类名精细控制日志级别：
+   logging.level.com.example.rag.embedding: DEBUG
+   其他类只打 INFO。IOC 单例做不到这种粒度。
+
+5. SLF4J = Simple Logging Facade for Java，Java 日志门面标准。
+   自己不打日志，只定义接口，底层由 Logback 等实现库干活。
+   类比：插座标准 vs 具体牌子插座，换实现不改代码。
+
+6. Javadoc 标签 @param/@return 必须贴方法上方（描述方法签名），
+   不能放类上方（类上方应写类的整体说明）。当前 EmbeddingClient
+   的注释位置是 Java 主流做法，IDE 悬停方法名能看全。
+
+
+Q（17）[OpenAiEmbeddingClient.java]：类名为啥叫 Client？
+「一句话多个向量」对吗？for-each 是 lambda 吗？
+log.debug vs throw 谁终止？为啥用 DEBUG 不用 INFO？
+
+A：
+1. Client = 调用外部服务/接口的类。本类通过 HTTP 调百炼 embedding
+   API，是外部服务的客户端。项目里 BaiLianRerankClient/NoopRerankClient
+   同理。区别于 Service（业务编排）、Repository（数据库）、
+   Controller（HTTP 入口）。
+
+2. 原注释「一句话分为多个向量」不准。实际：传入 texts（List），
+   每条文本返回一个向量，一一对应（response.data().size() ==
+   texts.size() 校验印证）。「一条文本」= 切出来的一个分块（300 字，
+   不止一句话）或用户的问题，不是语法上的句子。原注释已修正为
+   「一批文本一次调用，每条文本返回一个向量」。
+
+3. for (EmbeddingData item : response.data()) 不是 lambda，是
+   增强 for（for-each），Java 5 就有。冒号读作「in」。
+   对比：传统 for 用索引、for-each 直接拿元素、Stream+forEach
+   才是 lambda。不需索引/中断时 for-each 最简洁可读。
+
+4. throw 在 72 行是硬终止（维度校验失败立刻抛异常，后面代码不执行）；
+   log.debug 在 79 行不终止，只在全部校验通过后才打，走到 80 行
+   return 返回成功结果。避免「先打 success 日志结果中途抛异常」
+   的日志骗人问题。
+
+5. 日志级别从低到高：TRACE < DEBUG < INFO < WARN < ERROR。
+   Spring Boot 默认 INFO，DEBUG 默认不打。这行是「常规成功细节」，
+   生产不想每次都刷屏；排查时把 logging.level.com.example.rag.embedding
+   调成 DEBUG 才看得到。INFO 留给关键节点（服务启动、文档入库成功、
+   rerank 降级），ERROR 留给必须立刻处理的故障。
+
+
+========== model 包（Chunk / Document[已删] / ChatRequest[已挪走]）==========
+源文件：
+- src/main/java/com/example/rag/model/Chunk.java（保留）
+- src/main/java/com/example/rag/model/Document.java（已删）
+- src/main/java/com/example/rag/controller/ChatRequest.java（从 model 挪入）
+
+Q（18）[model 包]：model 里一般放什么？
+Chunk 凭什么留？ChatRequest 算不算 DTO？
+
+A：
+1. model 放「有身份、有生命周期、需要跨层流转的领域对象」：
+   通常对应数据库表或核心业务概念，标志是带 id、会被 Repository
+   查出来、在 Service/Controller 之间传来传去。
+
+
+3. Chunk 是跨域共享的核心领域实体，不属于任何单一功能域：
+   ingestion 写它、repository 查它、rerank 三个实现吃它、chat
+   喂 LLM、eval 判命中（共 9 处引用）。这种对象待在中立 model
+   包，谁都能引用、谁都不独占。
+
+4. ChatRequest 是典型入站 DTO（HTTP 请求 JSON 的反序列化载体，
+   零业务行为）。isSkipRetrieval() 不是判断逻辑，是 boolean
+   字段的 getter：JavaBean 规范规定 boolean 用 isXxx() 而非
+   getXxx()，Spring/序列化框架按此识别。DTO 与实体的分界不是
+   getter/setter（实体也有），而是：DTO 对应一次传输的形状
+   （请求体/响应体/外部协议），离开传输场景就无意义。
+
+5. 落盘动作：删 Document.java；ChatRequest 从 model 挪到
+   controller 包（唯一使用者 ChatController 在那，同包免
+   import）。model 包从「实体+HTTP DTO 混放」收敛为「跨层共享
+   领域实体」，只剩 Chunk，名实相符。将来 chat 相关类多到撑起
+   功能域时，再整体抽 chat/ 包，包随业务长，不预设空架子。
+
+
+========== DocumentRepository.java ==========
+源文件：src/main/java/com/example/rag/repository/DocumentRepository.java
+
+Q（19）[DocumentRepository.java]：Document 实体都删了，Repository
+是不是也没用？为啥不用 MBG？
+
+A：
+1. Repository 不冗余，t_document 表是入库流程的状态台账，
+   IngestionService.ingest 三次调用：insert 挂 PENDING →
+   切块/向量化/写 t_chunk 成功后 updateStatus("INGESTED") →
+   catch 里 updateStatus("FAILED")。冗余的只是 Document 实体类，
+   表、Repository、实体三者独立，死的只有最后一个。
+
+2. 没用 MBG 是因为项目压根没用 MyBatis：pom 里数据库层是
+   spring-boot-starter-jdbc（JdbcTemplate 手写 SQL）。MBG 是
+   MyBatis 生态的代码生成器，不在同一技术体系，不是「用不用」
+   的问题。
+
+3. 即便用 MyBatis，MBG 在此项目也不划算：①检索 SQL 是 pgvector
+   非标准语法（<=> 余弦距离、ORDER BY embedding <=> ?、JOIN
+   带出文档名），MBG 只会生成标准 CRUD，向量 SQL 照样手改；
+   ②只有两张表、两个 Repository，样板代码少，生成器省不下什么
+   还多一层 XML。MBG 适合 mall-swarm 那种几十张表、CRUD 密集
+   的后台；表少且 SQL 专用的场景两个前提都不成立。
+
+
+========== controller/ChatRequest.java（DTO 放包规则）==========
+源文件：
+- src/main/java/com/example/rag/controller/ChatRequest.java
+- src/main/java/com/example/rag/embedding/dto/（EmbeddingRequest/Response/Data）
+- src/main/java/com/example/rag/rerank/dto/（RerankRequest/Response）
+- src/main/java/com/example/rag/eval/（EvalCase/EvalReport 平级，无子包）
+
+Q（20）[ChatRequest.java]：embedding/rerank 的 DTO 开 dto 子包，
+为啥 ChatRequest 直接放 controller 同包？
+
+A：
+1. 规则不是「DTO 必须进 dto 包」，而是看两点：成组规模 + 概念
+   边界。
+2. 数量：embedding/dto 有 3 个类、rerank/dto 有 2 个（还各带
+   嵌套内部类），是描述一次外部 HTTP 完整报文的协议族，开子包
+   收纳一组；ChatRequest 只有 1 个类，单建 controller/dto/ 多
+   一层跳转零收益，属过度分层。
+3. 概念边界：embedding/rerank 的 dto 是百炼外部 API 协议映射，
+   字段名和嵌套结构与第三方报文严格对齐，与 Client 之间隔着
+   HTTP 序列化边界，是独立「协议层」；ChatRequest 就是
+   ChatController.chat 方法签名的一部分（@RequestBody ChatRequest
+   req），和 Controller 是同一入站边界的两面，中间没东西，无需
+   再切一层。
+4. eval 包同理：EvalCase/EvalReport 也是 DTO 性质，但平级直接
+   放 eval/ 下——该域选「整个功能域一个包」，embedding 选按技术
+   边界切。包结构服务于找代码的直觉，不服务分类学上的整齐。

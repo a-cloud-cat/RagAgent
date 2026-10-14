@@ -1,5 +1,4 @@
-package com.example.rag.model;
-
+package com.example.rag.controller;
 
 public class ChatRequest {
     private String question;

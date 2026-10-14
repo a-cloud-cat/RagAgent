@@ -1,6 +1,5 @@
 package com.example.rag.controller;
 
-import com.example.rag.model.ChatRequest;
 import com.example.rag.service.ChatService;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;

@@ -18,7 +18,7 @@ public class HealthController {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    // 恒返回 200：就绪与否用字段表达，避免前端 500 和"后端未启动"两种失败混在一起
+    // 返回 200：数据库是否成功就绪用字段表达，避免数据库问题和其他后端bug问题都返回500
     @GetMapping("/retrieval")
     public Map<String, Boolean> retrieval() {
         try {

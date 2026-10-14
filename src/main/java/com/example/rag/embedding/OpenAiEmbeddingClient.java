@@ -22,7 +22,6 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
 
     private static final Logger log = LoggerFactory.getLogger(OpenAiEmbeddingClient.class);
 
-    /** 百炼的 OpenAI 兼容 embedding 接口路径 */
     private static final String EMBEDDING_PATH = "/compatible-mode/v1/embeddings";
 
     private final WebClient webClient;
@@ -36,7 +35,6 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
 
     @Override
     public List<float[]> embed(List<String> texts) {
-        // 配置防错：key 没填就立刻失败
         if (properties.getApiKey() == null || properties.getApiKey().isBlank()) {
             throw new IllegalStateException("百炼 API-KEY 未配置，请填写 application.yaml 中的 rag.embedding.api-key");
         }
@@ -45,7 +43,7 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
         EmbeddingRequest request = new EmbeddingRequest(
                 properties.getModel(), texts, properties.getDimension());
 
-        // 非流式：一次性返回完整结果，所以用 bodyToMono（不是 bodyToFlux）。
+        // bodyToMono 非流式一次性返回完整结果
         EmbeddingResponse response = webClient.post()
                 .uri(properties.getBaseUrl() + EMBEDDING_PATH)
                 .header("Authorization", "Bearer " + properties.getApiKey())
@@ -59,7 +57,7 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
             throw new IllegalStateException("百炼 embedding 响应为空");
         }
 
-        //一句话分为多个向量，一次性返回多个向量，每个向量的维度应是配置的维度
+        //一批文本一次调用，每条文本返回一个向量，每个向量的维度应是配置的维度
         // 条数校验：返回向量数与输入文本数一致，防止后续按顺序对齐分块会错位
         if (response.data().size() != texts.size()) {
             throw new IllegalStateException(

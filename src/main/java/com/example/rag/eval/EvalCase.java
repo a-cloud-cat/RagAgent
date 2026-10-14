@@ -5,7 +5,6 @@ package com.example.rag.eval;
  */
 public class EvalCase {
 
-    /** 评测问题 */
     private String question;
 
     /** 期望命中的文档名 */

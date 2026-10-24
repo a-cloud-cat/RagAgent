@@ -23,9 +23,7 @@ public class ChunkRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    /**
-     * 批量写入分块及其向量（一个事务，全部成功或全部回滚）。
-     */
+    /** 批量写入分块及其向量（一个事务，全部成功或全部回滚）。 */
     @Transactional
     public void batchInsert(List<Chunk> chunks) {
         jdbcTemplate.batchUpdate(
@@ -73,6 +71,20 @@ public class ChunkRepository {
         chunk.setContent(rs.getString("content"));
         chunk.setScore(rs.getDouble("score"));
         return chunk;
+    }
+
+    /** 级联软删除某文档下的全部分块，与文档软删除同事务。 */
+    public int markDeletedByDocumentId(Long documentId) {
+        return jdbcTemplate.update(
+                "UPDATE t_chunk SET deleted = 1 WHERE document_id = ? AND deleted = 0",
+                documentId);
+    }
+
+    /** 级联恢复某文档下的全部分块，与文档恢复同事务。 */
+    public int restoreByDocumentId(Long documentId) {
+        return jdbcTemplate.update(
+                "UPDATE t_chunk SET deleted = 0 WHERE document_id = ? AND deleted = 1",
+                documentId);
     }
 
     /** float[] -> pgvector 参数对象 */

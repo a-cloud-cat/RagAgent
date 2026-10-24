@@ -20,7 +20,20 @@
             font-size: 17px;
             font-weight: 600;
             box-shadow: 0 2px 6px rgba(0,0,0,.12);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
+        .doc-btn {
+            background: rgba(255,255,255,.18);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,.4);
+            border-radius: 6px;
+            padding: 5px 14px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .doc-btn:hover { background: rgba(255,255,255,.28); }
         #messages {
             flex: 1;
             overflow-y: auto;
@@ -168,10 +181,28 @@
         }
         #modal-cancel { background: #f3f4f6; color: #374151; }
         #modal-ok { background: #2563eb; color: #fff; }
+        .doc-modal-dialog { width: 640px; max-width: calc(100vw - 40px); }
+        .doc-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+        .doc-modal-title { font-size: 16px; font-weight: 600; color: #1f2937; }
+        .doc-refresh { background: #f3f4f6; color: #374151; border: none; border-radius: 6px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+        .doc-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .doc-table th, .doc-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        .doc-table th { color: #6b7280; font-weight: 500; font-size: 13px; background: #f9fafb; }
+        .doc-table td { color: #1f2937; }
+        .doc-status { font-size: 12px; padding: 2px 8px; border-radius: 10px; }
+        .doc-status.INGESTED { background: #dcfce7; color: #166534; }
+        .doc-status.FAILED { background: #fee2e2; color: #991b1b; }
+        .doc-status.PENDING { background: #fef3c7; color: #92400e; }
+        .doc-empty { text-align: center; color: #9ca3af; padding: 30px 0; font-size: 14px; }
+        .doc-del-btn { background: #fee2e2; color: #b91c1c; border: none; border-radius: 6px; padding: 4px 12px; font-size: 13px; cursor: pointer; }
+        .doc-del-btn:hover { background: #fecaca; }
+        .doc-restore-btn { background: #dbeafe; color: #1d4ed8; border: none; border-radius: 6px; padding: 4px 12px; font-size: 13px; cursor: pointer; }
+        .doc-restore-btn:hover { background: #bfdbfe; }
+        .doc-bin-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #374151; cursor: pointer; }
     </style>
 </head>
 <body>
-<header>RAG 智能助手</header>
+<header><span>RAG 智能助手</span><button id="doc-manage-btn" class="doc-btn">文档</button></header>
 <div id="messages">
     <div class="hint">在下方输入问题开始对话（接口 POST /chat，SSE 流式返回）</div>
 </div>
@@ -192,6 +223,22 @@
     </div>
 </div>
 
+<div id="doc-modal" class="modal-overlay">
+    <div class="modal-dialog doc-modal-dialog">
+        <div class="doc-modal-head">
+            <div class="doc-modal-title">文档列表</div>
+            <div style="display:flex; align-items:center; gap:14px;">
+                <label class="doc-bin-toggle"><input type="checkbox" id="doc-bin-check"> 回收站</label>
+                <button id="doc-refresh-btn" class="doc-refresh">刷新</button>
+            </div>
+        </div>
+        <div id="doc-list-body"></div>
+        <div class="modal-actions">
+            <button id="doc-close-btn">关闭</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('question');
@@ -201,6 +248,12 @@
     const modalTextEl = document.getElementById('modal-text');
     const modalOkBtn = document.getElementById('modal-ok');
     const modalCancelBtn = document.getElementById('modal-cancel');
+    const docManageBtn = document.getElementById('doc-manage-btn');
+    const docModal = document.getElementById('doc-modal');
+    const docListBody = document.getElementById('doc-list-body');
+    const docRefreshBtn = document.getElementById('doc-refresh-btn');
+    const docCloseBtn = document.getElementById('doc-close-btn');
+    const docBinCheck = document.getElementById('doc-bin-check');
     let busy = false;
 
     // Promise 化的居中确认框：resolve(true)=确认降级，resolve(false)=取消发送
@@ -241,6 +294,79 @@
         if (busy) currentAbort && currentAbort.abort();
         else send();
     });
+
+    docManageBtn.addEventListener('click', () => { docBinCheck.checked = false; docModal.classList.add('show'); loadDocuments(false); });
+    docCloseBtn.addEventListener('click', () => docModal.classList.remove('show'));
+    docRefreshBtn.addEventListener('click', () => loadDocuments(docBinCheck.checked));
+    docBinCheck.addEventListener('change', () => loadDocuments(docBinCheck.checked));
+    docModal.addEventListener('click', (e) => {
+        if (e.target === docModal) { docModal.classList.remove('show'); return; }
+        const delBtn = e.target.closest('.doc-del-btn');
+        if (delBtn) { deleteDocument(delBtn.dataset.id, delBtn.dataset.name); return; }
+        const resBtn = e.target.closest('.doc-restore-btn');
+        if (resBtn) restoreDocument(resBtn.dataset.id, resBtn.dataset.name);
+    });
+
+    async function deleteDocument(id, name) {
+        if (!confirm('确定删除文档「' + name + '」及其全部分块吗？（可在回收站恢复）')) return;
+        try {
+            const resp = await fetch('/documents/' + id, { method: 'DELETE' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            loadDocuments(false);
+        } catch (e) {
+            alert('删除失败：' + e.message);
+        }
+    }
+
+    async function restoreDocument(id, name) {
+        if (!confirm('确定恢复文档「' + name + '」及其全部分块吗？')) return;
+        try {
+            const resp = await fetch('/documents/' + id + '/restore', { method: 'POST' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            loadDocuments(true);
+        } catch (e) {
+            alert('恢复失败：' + e.message);
+        }
+    }
+
+    async function loadDocuments(deleted) {
+        docListBody.innerHTML = '<div class="doc-empty">加载中…</div>';
+        try {
+            const resp = await fetch(deleted ? '/documents/deleted' : '/documents');
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const docs = await resp.json();
+            if (!docs || docs.length === 0) {
+                docListBody.innerHTML = '<div class="doc-empty">' + (deleted ? '回收站为空' : '暂无文档，请先上传') + '</div>';
+                return;
+            }
+            const actionBtn = deleted
+                ? '<button class="doc-restore-btn" data-id="ID" data-name="NAME">恢复</button>'
+                : '<button class="doc-del-btn" data-id="ID" data-name="NAME">删除</button>';
+            let html = '<table class="doc-table"><thead><tr>'
+                + '<th>名称</th><th>状态</th><th>分块数</th><th>创建时间</th><th></th>'
+                + '</tr></thead><tbody>';
+            for (const d of docs) {
+                const time = d.createTime ? d.createTime.replace('T', ' ').substring(0, 19) : '-';
+                html += '<tr>'
+                    + '<td>' + escapeHtml(d.name) + '</td>'
+                    + '<td><span class="doc-status ' + d.status + '">' + d.status + '</span></td>'
+                    + '<td>' + (d.chunkCount ?? 0) + '</td>'
+                    + '<td>' + time + '</td>'
+                    + '<td>' + actionBtn.replace('ID', d.id).replace('NAME', escapeHtml(d.name)) + '</td>'
+                    + '</tr>';
+            }
+            html += '</tbody></table>';
+            docListBody.innerHTML = html;
+        } catch (e) {
+            docListBody.innerHTML = '<div class="doc-empty">加载失败：' + e.message + '</div>';
+        }
+    }
+
+    function escapeHtml(s) {
+        const div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+    }
 
     function setStoppingUi(stopping) {
         sendBtn.classList.toggle('stopping', stopping);

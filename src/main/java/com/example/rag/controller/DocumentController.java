@@ -2,15 +2,20 @@ package com.example.rag.controller;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.example.rag.model.Document;
 import com.example.rag.parser.DocumentParser;
 import com.example.rag.service.IngestionService;
 
@@ -30,6 +35,30 @@ public class DocumentController {
     public DocumentController(IngestionService ingestionService, DocumentParser documentParser) {
         this.ingestionService = ingestionService;
         this.documentParser = documentParser;
+    }
+
+    /** 列出知识库中所有文档及其分块数。 */
+    @GetMapping
+    public List<Document> list() {
+        return ingestionService.listDocuments();
+    }
+
+    /** 软删除文档及其全部分块（deleted 置 1，可恢复）。 */
+    @DeleteMapping("/{id}")
+    public void delete(@PathVariable Long id) {
+        ingestionService.deleteDocument(id);
+    }
+
+    /** 回收站：列出所有已删除文档。 */
+    @GetMapping("/deleted")
+    public List<Document> listDeleted() {
+        return ingestionService.listDeletedDocuments();
+    }
+
+    /** 从回收站恢复文档及其全部分块（deleted 置回 0）。 */
+    @PostMapping("/{id}/restore")
+    public void restore(@PathVariable Long id) {
+        ingestionService.restoreDocument(id);
     }
 
     /**

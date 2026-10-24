@@ -6,9 +6,11 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.example.rag.embedding.EmbeddingClient;
 import com.example.rag.model.Chunk;
+import com.example.rag.model.Document;
 import com.example.rag.repository.ChunkRepository;
 import com.example.rag.repository.DocumentRepository;
 
@@ -71,6 +73,30 @@ public class IngestionService {
             documentRepository.updateStatus(documentId, "FAILED");
             throw new IllegalStateException("文档入库失败：" + e.getMessage(), e);
         }
+    }
+
+    /** 列出知识库中所有未删除文档。 */
+    public List<Document> listDocuments() {
+        return documentRepository.listAll();
+    }
+
+    /** 软删除文档及其全部分块：一个事务内两步都置 deleted=1，任一步失败整体回滚。 */
+    @Transactional
+    public void deleteDocument(Long id) {
+        documentRepository.markDeleted(id);
+        chunkRepository.markDeletedByDocumentId(id);
+    }
+
+    /** 列出回收站中所有已删除文档。 */
+    public List<Document> listDeletedDocuments() {
+        return documentRepository.listDeleted();
+    }
+
+    /** 恢复文档及其全部分块：一个事务内两步都置 deleted=0，任一步失败整体回滚。 */
+    @Transactional
+    public void restoreDocument(Long id) {
+        documentRepository.restore(id);
+        chunkRepository.restoreByDocumentId(id);
     }
 
     /** 分批调用向量化接口，按原顺序拼回全部向量。 */

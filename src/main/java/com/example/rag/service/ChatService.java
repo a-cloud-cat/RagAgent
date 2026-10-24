@@ -126,7 +126,11 @@ public class ChatService {
                         emitter.send(chunk);
                     } catch (IOException e) {
                         log.warn("SSE 发送失败，客户端可能已断开，取消上游订阅", e);
-                        subscriptionRef.get().dispose();
+                        // subscribe() 返回前同步源可能已触发回调，此时句柄尚未入槽
+                        Disposable current = subscriptionRef.get();
+                        if (current != null) {
+                            current.dispose();
+                        }
                         emitter.completeWithError(e);
                     }
                 },

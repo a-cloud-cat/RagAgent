@@ -6,12 +6,14 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 
 import com.example.rag.config.EmbeddingProperties;
 import com.example.rag.config.LlmProperties;
+import com.example.rag.config.PricingProperties;
 import com.example.rag.config.RerankProperties;
 import com.example.rag.config.RetrievalProperties;
 
 
 @SpringBootApplication
-@EnableConfigurationProperties({LlmProperties.class, EmbeddingProperties.class, RetrievalProperties.class, RerankProperties.class})
+@EnableConfigurationProperties({LlmProperties.class, EmbeddingProperties.class, RetrievalProperties.class,
+        RerankProperties.class, PricingProperties.class})
 public class RagApplication {
 
     public static void main(String[] args) {

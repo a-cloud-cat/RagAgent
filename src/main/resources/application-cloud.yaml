@@ -6,3 +6,11 @@ rag:
     base-url: https://api.deepseek.com/v1
     api-key: ${DEEPSEEK_API_KEY:}
     model-name: deepseek-v4-pro
+    # 峰谷计费：高峰为北京时间周一至周五 9:00-12:00、14:00-18:00，其余时段半价。
+    # 单价为高峰价（元/百万 tokens），官方价格调整时只需改这里。
+    pricing:
+      enabled: true
+      peak-cache-hit-price: 0.30
+      peak-cache-miss-price: 9.0
+      peak-output-price: 27.0
+      off-peak-ratio: 0.5

@@ -151,6 +151,16 @@
             line-height: 1.5;
             margin-bottom: 8px;
         }
+        .msg-meta {
+            margin-top: 10px;
+            padding-top: 6px;
+            border-top: 1px dashed #e5e7eb;
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        /* 未调用模型（闸门拒答/中止）时不留空的分隔线 */
+        .msg-meta:empty { display: none; }
         .modal-overlay {
             position: fixed;
             inset: 0;
@@ -280,6 +290,8 @@
     }
     // 会话内"已知晓知识库不可用"的确认状态；知识库恢复后重置，不做永久放行
     let degradedConfirmed = false;
+    // 计费口径（当前峰谷时段与单价），后端未启用时为 null
+    let pricingInfo = null;
     // 当前进行中请求的取消句柄，空闲为 null；供终止按钮跨事件访问
     let currentAbort = null;
 
@@ -474,6 +486,41 @@
 
     // 页面加载即探活，pg 未启动时立刻给出常驻提示
     refreshKbStatus();
+    loadPricing();
+
+    async function loadPricing() {
+        try {
+            const resp = await fetch('/pricing');
+            pricingInfo = await resp.json();
+        } catch (e) {
+            pricingInfo = null;
+        }
+    }
+
+    function renderUsage(el, usage) {
+        const hit = usage.prompt_cache_hit_tokens || 0;
+        const miss = usage.prompt_cache_miss_tokens != null
+            ? usage.prompt_cache_miss_tokens
+            : Math.max(0, (usage.prompt_tokens || 0) - hit);
+        const completion = usage.completion_tokens || 0;
+        let text = '输入 ' + fmt(usage.prompt_tokens) + '（缓存命中 ' + fmt(hit) + '）'
+            + ' · 输出 ' + fmt(completion)
+            + ' · 合计 ' + fmt(usage.total_tokens) + ' tokens';
+
+        if (pricingInfo && pricingInfo.enabled) {
+            const p = pricingInfo.prices;
+            const cost = (hit * p.cacheHit + miss * p.cacheMiss + completion * p.output) / 1e6;
+            const periodText = pricingInfo.period === 'PEAK'
+                ? '高峰全价'
+                : '闲时 ' + (pricingInfo.rate * 10) + ' 折';
+            text += ' · ' + periodText + ' · 约 ¥' + cost.toFixed(6);
+        }
+        el.textContent = text;
+    }
+
+    function fmt(n) {
+        return (n == null ? 0 : n).toLocaleString('zh-CN');
+    }
 
     function addDegradedBanner(bubble, reason) {
         const banner = document.createElement('div');
@@ -536,8 +583,11 @@
         reasoning.appendChild(summary);
         reasoning.appendChild(rText);
         const content = document.createElement('div');
+        const meta = document.createElement('div');
+        meta.className = 'msg-meta';
         bubble.appendChild(reasoning);
         bubble.appendChild(content);
+        bubble.appendChild(meta);
 
         try {
             const resp = await fetch('/chat', {
@@ -590,6 +640,12 @@
                         continue;
                     }
                     eventName = '';
+
+                    // DeepSeek 在 [DONE] 前的最后一个 chunk 附带 usage，与内容 delta 互斥
+                    if (json.usage) {
+                        renderUsage(meta, json.usage);
+                        continue;
+                    }
 
                     const delta = json.choices && json.choices[0] && json.choices[0].delta;
                     if (!delta) continue;

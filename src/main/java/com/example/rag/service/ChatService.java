@@ -2,6 +2,7 @@ package com.example.rag.service;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,7 +31,8 @@ public class ChatService {
             你是一个严谨的问答助手。请严格根据下面「参考资料」回答用户问题：
             1. 资料里有依据的，直接回答；
             2. 资料里没有的内容，明确说「根据现有资料无法回答」，不要编造；
-            3. 回答使用与问题相同的语言。
+            3. 引用某条资料时，在对应语句末尾标注该资料的编号，如 [1]；
+            4. 回答使用与问题相同的语言。
 
             参考资料：
             %s""";
@@ -93,6 +95,16 @@ public class ChatService {
                     retrieved.stream()
                             .map(c -> String.format("%.3f", c.getScore()))
                             .collect(Collectors.joining(", ")));
+            // 先下发来源再流式回答：前端据此在正文旁挂可展开的原文，编号与 prompt 里的 [n] 一致
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("sources")
+                        .data(Map.of("sources", buildSources(retrieved)), MediaType.APPLICATION_JSON));
+            } catch (IOException e) {
+                log.warn("来源事件发送失败，客户端可能已断开", e);
+                emitter.completeWithError(e);
+                return;
+            }
         }
 
         List<Map<String, String>> messages = new ArrayList<>();
@@ -172,6 +184,22 @@ public class ChatService {
             log.warn("拒答消息发送失败，客户端可能已断开", e);
             emitter.completeWithError(e);
         }
+    }
+
+    /** 把召回分块转成前端可展示的来源条目，index 与 buildContext 的编号保持一致。 */
+    private List<Map<String, Object>> buildSources(List<Chunk> chunks) {
+        List<Map<String, Object>> sources = new ArrayList<>(chunks.size());
+        for (int i = 0; i < chunks.size(); i++) {
+            Chunk chunk = chunks.get(i);
+            Map<String, Object> source = new LinkedHashMap<>();
+            source.put("index", i + 1);
+            source.put("documentName", chunk.getDocumentName());
+            source.put("chunkIndex", chunk.getChunkIndex());
+            source.put("score", chunk.getScore());
+            source.put("content", chunk.getContent());
+            sources.add(source);
+        }
+        return sources;
     }
 
     /** 把召回分块编号拼接成参考资料文本。 */

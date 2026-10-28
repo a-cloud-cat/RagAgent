@@ -161,6 +161,38 @@
         }
         /* 未调用模型（闸门拒答/中止）时不留空的分隔线 */
         .msg-meta:empty { display: none; }
+        details.sources {
+            margin-top: 10px;
+            border-top: 1px dashed #e5e7eb;
+            padding-top: 8px;
+            font-size: 13px;
+        }
+        details.sources summary {
+            cursor: pointer;
+            color: #2563eb;
+            user-select: none;
+        }
+        .source-item {
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .source-head { color: #374151; font-weight: 500; margin-bottom: 4px; }
+        .source-text {
+            color: #6b7280;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+            /* 默认只露前两行，点开看全文，避免来源面板把对话淹没 */
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .source-item.expanded .source-text { display: block; }
         .modal-overlay {
             position: fixed;
             inset: 0;
@@ -529,6 +561,37 @@
         bubble.prepend(banner);
     }
 
+    // 来源面板挂在 meta 之前：sources 事件先于正文到达，直接 append 会排到正文下面
+    function renderSources(bubble, meta, sources) {
+        if (!sources || !sources.length) return;
+
+        const details = document.createElement('details');
+        details.className = 'sources';
+        const summary = document.createElement('summary');
+        summary.textContent = '来源 (' + sources.length + ')';
+        details.appendChild(summary);
+
+        sources.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'source-item';
+            const head = document.createElement('div');
+            head.className = 'source-head';
+            head.textContent = '[' + s.index + '] ' + (s.documentName || '未知文档')
+                + ' · 第 ' + (Number(s.chunkIndex) + 1) + ' 块';
+            const text = document.createElement('div');
+            text.className = 'source-text';
+            // 正文来自用户上传的文档，按纯文本写入，不解析任何标签
+            text.textContent = s.content || '';
+            item.appendChild(head);
+            item.appendChild(text);
+            item.title = '点击展开 / 收起原文';
+            item.addEventListener('click', () => item.classList.toggle('expanded'));
+            details.appendChild(item);
+        });
+
+        bubble.insertBefore(details, meta);
+    }
+
     // 输入框发送：userWrap 传 null，确认通过后再建气泡，取消则输入框内容保留
     async function send() {
         const question = inputEl.value.trim();
@@ -636,6 +699,11 @@
                     // 命名事件：检索链路中途故障的降级通知，与 token 流协议级分流
                     if (eventName === 'degraded') {
                         addDegradedBanner(bubble, json.reason);
+                        eventName = '';
+                        continue;
+                    }
+                    if (eventName === 'sources') {
+                        renderSources(bubble, meta, json.sources);
                         eventName = '';
                         continue;
                     }

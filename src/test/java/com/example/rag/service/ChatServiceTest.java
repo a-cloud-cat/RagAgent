@@ -81,7 +81,7 @@ class ChatServiceTest {
         doThrow(new IOException("客户端断开")).when(emitter).send(any(String.class));
 
         // skipRetrieval=true 绕开检索，直接进入 LLM 流式分支
-        assertDoesNotThrow(() -> service.streamChat("问题", emitter, true));
+        assertDoesNotThrow(() -> service.streamChat("问题", emitter, true, List.of()));
 
         verify(emitter).completeWithError(any(IOException.class));
     }
@@ -96,7 +96,7 @@ class ChatServiceTest {
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false);
+        service.streamChat("问题", emitter, false, List.of());
 
         ArgumentCaptor<SseEmitter.SseEventBuilder> captor =
                 ArgumentCaptor.forClass(SseEmitter.SseEventBuilder.class);
@@ -129,7 +129,7 @@ class ChatServiceTest {
                 .thenReturn(new RetrievalOutcome(List.of(), 0.1, false));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false);
+        service.streamChat("问题", emitter, false, List.of());
 
         // 拦截走 refuse：只发 Object 类型的拒答文案，不发 SseEventBuilder 命名事件
         verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
@@ -139,7 +139,7 @@ class ChatServiceTest {
     @Test
     void 跳过检索时不下发来源事件() throws IOException {
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, true);
+        service.streamChat("问题", emitter, true, List.of());
 
         verify(retrievalService, never()).retrieve(anyString());
         verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
@@ -156,7 +156,7 @@ class ChatServiceTest {
         SseEmitter emitter = mock(SseEmitter.class);
         doThrow(new IOException("客户端断开")).when(emitter).send(any(SseEmitter.SseEventBuilder.class));
 
-        service.streamChat("问题", emitter, false);
+        service.streamChat("问题", emitter, false, List.of());
 
         verify(emitter).completeWithError(any(IOException.class));
         verify(webClient, never()).post();
@@ -172,7 +172,7 @@ class ChatServiceTest {
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false);
+        service.streamChat("问题", emitter, false, List.of());
 
         ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
         verify(bodySpec).bodyValue(bodyCaptor.capture());
@@ -187,5 +187,36 @@ class ChatServiceTest {
 
         assertTrue(systemContent.contains("标注该资料的编号"),
                 "系统提示词应要求回答时标注资料编号");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void history按顺序拼入messages且位于system与当前问题之间() throws IOException {
+        Chunk chunk = new Chunk(1L, 0, "正文", null);
+        chunk.setDocumentName("learn.txt");
+        chunk.setScore(0.612);
+        when(retrievalService.retrieve(anyString()))
+                .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
+
+        List<Map<String, String>> history = List.of(
+                Map.of("role", "user", "content", "第一轮问题"),
+                Map.of("role", "assistant", "content", "第一轮回答")
+        );
+
+        SseEmitter emitter = mock(SseEmitter.class);
+        service.streamChat("当前问题", emitter, false, history);
+
+        ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(bodySpec).bodyValue(bodyCaptor.capture());
+
+        Map<String, Object> body = (Map<String, Object>) bodyCaptor.getValue();
+        List<Map<String, String>> messages = (List<Map<String, String>>) body.get("messages");
+
+        List<String> roles = messages.stream().map(m -> m.get("role")).toList();
+        assertEquals(List.of("system", "user", "assistant", "user"), roles,
+                "messages 顺序应为 system + history + 当前 user");
+        assertEquals("第一轮问题", messages.get(1).get("content"));
+        assertEquals("第一轮回答", messages.get(2).get("content"));
+        assertEquals("当前问题", messages.get(3).get("content"));
     }
 }

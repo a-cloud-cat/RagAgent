@@ -599,6 +599,29 @@
         runTurn(question, null);
     }
 
+    // 收集 userWrap 之前所有已完成轮次为 history，不含当前问题
+    function collectHistory(userWrap) {
+        const history = [];
+        let node = messagesEl.firstElementChild;
+        while (node && node !== userWrap) {
+            if (node.classList.contains('msg')) {
+                if (node.classList.contains('user')) {
+                    const bubble = node.querySelector('.bubble');
+                    if (bubble) history.push({ role: 'user', content: bubble.textContent });
+                } else if (node.classList.contains('ai')) {
+                    const answer = node.querySelector('.bubble > .answer');
+                    if (answer) {
+                        // 去掉用户主动终止留下的标记，避免污染上下文
+                        const text = answer.textContent.replace(/（已停止）$/, '').trim();
+                        if (text) history.push({ role: 'assistant', content: text });
+                    }
+                }
+            }
+            node = node.nextElementSibling;
+        }
+        return history;
+    }
+
     // 一个问答回合：新建、重新发送、修改共用。userWrap 决定回答气泡插在哪
     async function runTurn(question, userWrap) {
         if (busy) return;
@@ -624,8 +647,13 @@
             userWrap = addUserMessage(question).wrap;
             inputEl.value = '';
         }
-        const oldAi = userWrap.nextElementSibling;
-        if (oldAi && oldAi.classList.contains('ai')) oldAi.remove();
+        // 多轮记忆下，编辑/重发会改变该轮回答，后续轮次依赖失效，整段截断
+        let next = userWrap.nextElementSibling;
+        while (next) {
+            const target = next;
+            next = next.nextElementSibling;
+            if (target.classList.contains('msg')) target.remove();
+        }
 
         busy = true;
         const abortController = new AbortController();
@@ -646,6 +674,7 @@
         reasoning.appendChild(summary);
         reasoning.appendChild(rText);
         const content = document.createElement('div');
+        content.className = 'answer';
         const meta = document.createElement('div');
         meta.className = 'msg-meta';
         bubble.appendChild(reasoning);
@@ -653,10 +682,11 @@
         bubble.appendChild(meta);
 
         try {
+            const history = collectHistory(userWrap);
             const resp = await fetch('/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question, skipRetrieval }),
+                body: JSON.stringify({ question, skipRetrieval, history }),
                 signal: abortController.signal
             });
             if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);

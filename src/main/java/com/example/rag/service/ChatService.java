@@ -27,12 +27,16 @@ public class ChatService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
 
+    // history 保留最近 N 轮，超出从前面丢弃；1 轮 = 1 条 user + 1 条 assistant
+    private static final int MAX_HISTORY_TURNS = 10;
+
     private static final String SYSTEM_PROMPT_TEMPLATE = """
             你是一个严谨的问答助手。请严格根据下面「参考资料」回答用户问题：
             1. 资料里有依据的，直接回答；
             2. 资料里没有的内容，明确说「根据现有资料无法回答」，不要编造；
             3. 引用某条资料时，在对应语句末尾标注该资料的编号，如 [1]；
-            4. 回答使用与问题相同的语言。
+            4. 回答使用与问题相同的语言；
+            5. 结合对话上下文回答，若上下文与参考资料冲突，以参考资料为准。
 
             参考资料：
             %s""";
@@ -54,7 +58,8 @@ public class ChatService {
         this.retrievalService = retrievalService;
     }
 
-    public void streamChat(String question, SseEmitter emitter, boolean skipRetrieval) {
+    public void streamChat(String question, SseEmitter emitter, boolean skipRetrieval,
+                           List<Map<String, String>> history) {
         List<Chunk> retrieved = List.of();
         RetrievalOutcome outcome = null;
 
@@ -112,6 +117,8 @@ public class ChatService {
             String context = buildContext(retrieved);
             messages.add(Map.of("role", "system", "content", SYSTEM_PROMPT_TEMPLATE.formatted(context)));
         }
+        // DeepSeek API 无状态，多轮上下文由前端每次全量传入并拼入 messages
+        messages.addAll(truncateHistory(history));
         messages.add(Map.of("role", "user", "content", question));
 
         Map<String, Object> requestBody = Map.of(
@@ -209,5 +216,22 @@ public class ChatService {
             sb.append('[').append(i + 1).append("] ").append(chunks.get(i).getContent()).append("\n\n");
         }
         return sb.toString().trim();
+    }
+
+    /** history 超长截断：保留最近 MAX_HISTORY_TURNS 轮，超出从前面丢；截断后若首条是 assistant 再补丢一条，保证以 user 开头。 */
+    private List<Map<String, String>> truncateHistory(List<Map<String, String>> history) {
+        if (history == null || history.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, String>> result = new ArrayList<>(history);
+        int maxMessages = MAX_HISTORY_TURNS * 2;
+        while (result.size() > maxMessages) {
+            result.remove(0);
+        }
+        // 保证首条是 user，避免 LLM API 报角色交替错误
+        while (!result.isEmpty() && "assistant".equals(result.get(0).get("role"))) {
+            result.remove(0);
+        }
+        return result;
     }
 }

@@ -646,6 +646,9 @@
         if (!userWrap) {
             userWrap = addUserMessage(question).wrap;
             inputEl.value = '';
+        } else {
+            // 编辑/重发改变了历史上下文，旧摘要失效
+            localStorage.removeItem('chat-summary');
         }
         // 多轮记忆下，编辑/重发会改变该轮回答，后续轮次依赖失效，整段截断
         let next = userWrap.nextElementSibling;
@@ -683,10 +686,11 @@
 
         try {
             const history = collectHistory(userWrap);
+            const summary = localStorage.getItem('chat-summary') || '';
             const resp = await fetch('/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question, skipRetrieval, history }),
+                body: JSON.stringify({ question, skipRetrieval, history, summary }),
                 signal: abortController.signal
             });
             if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
@@ -734,6 +738,11 @@
                     }
                     if (eventName === 'sources') {
                         renderSources(bubble, meta, json.sources);
+                        eventName = '';
+                        continue;
+                    }
+                    if (eventName === 'summary') {
+                        if (json.summary) localStorage.setItem('chat-summary', json.summary);
                         eventName = '';
                         continue;
                     }

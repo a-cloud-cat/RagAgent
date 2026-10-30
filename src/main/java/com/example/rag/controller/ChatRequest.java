@@ -12,6 +12,9 @@ public class ChatRequest {
     // 当前问题之前的对话历史，[{role, content}]，不含当前 question
     private List<Map<String, String>> history;
 
+    // 早期对话的摘要，由前端从 localStorage 传入；无则为 null
+    private String summary;
+
     public String getQuestion() {
         return question;
     }
@@ -34,5 +37,13 @@ public class ChatRequest {
 
     public void setHistory(List<Map<String, String>> history) {
         this.history = history;
+    }
+
+    public String getSummary() {
+        return summary;
+    }
+
+    public void setSummary(String summary) {
+        this.summary = summary;
     }
 }

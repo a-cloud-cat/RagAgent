@@ -21,6 +21,7 @@ import com.example.rag.model.Chunk;
 
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 @Service
 public class ChatService {
@@ -29,6 +30,19 @@ public class ChatService {
 
     // history 保留最近 N 轮，超出从前面丢弃；1 轮 = 1 条 user + 1 条 assistant
     private static final int MAX_HISTORY_TURNS = 10;
+
+    // history 超过该轮数时触发摘要，用摘要替代早期原文
+    private static final int SUMMARY_TRIGGER_TURNS = 8;
+    // 摘要生成后，最近 N 轮仍保留原文，保证近期细节不丢
+    private static final int RECENT_KEEP_TURNS = 4;
+    private static final int SUMMARY_MAX_CHARS = 200;
+
+    private static final String SUMMARY_PROMPT = """
+            你是会话记忆摘要器，把多轮对话浓缩成话题索引。
+            只记：具体话题、处理状态、用户明确提出的约束条件
+            不记：具体答案、数据、规则细节（问答助手每次实时检索最新资料，摘要里的答案会与之冲突）
+            单行输出，不超过 %d 字。
+            格式：用户咨询了【话题1】（状态）、【话题2】（状态）。约束：…。关键词：…""".formatted(SUMMARY_MAX_CHARS);
 
     private static final String SYSTEM_PROMPT_TEMPLATE = """
             你是一个严谨的问答助手。请严格根据下面「参考资料」回答用户问题：
@@ -59,7 +73,7 @@ public class ChatService {
     }
 
     public void streamChat(String question, SseEmitter emitter, boolean skipRetrieval,
-                           List<Map<String, String>> history) {
+                           List<Map<String, String>> history, String summary) {
         List<Chunk> retrieved = List.of();
         RetrievalOutcome outcome = null;
 
@@ -112,13 +126,32 @@ public class ChatService {
             }
         }
 
+        List<Map<String, String>> truncated = truncateHistory(history);
+        int historyTurns = truncated.size() / 2;
+
+        // history 超阈值时用摘要替代早期原文，近期保留 RECENT_KEEP_TURNS 轮
+        String effectiveSummary = summary;
+        List<Map<String, String>> recentHistory = truncated;
+        if (historyTurns > SUMMARY_TRIGGER_TURNS) {
+            int recentCount = RECENT_KEEP_TURNS * 2;
+            List<Map<String, String>> earlyMessages = truncated.subList(0, truncated.size() - recentCount);
+            recentHistory = new ArrayList<>(truncated.subList(truncated.size() - recentCount, truncated.size()));
+            if (effectiveSummary == null || effectiveSummary.isBlank()) {
+                effectiveSummary = generateSummary(earlyMessages, emitter);
+            }
+        }
+
         List<Map<String, String>> messages = new ArrayList<>();
         if (!retrieved.isEmpty()) {
             String context = buildContext(retrieved);
             messages.add(Map.of("role", "system", "content", SYSTEM_PROMPT_TEMPLATE.formatted(context)));
         }
-        // DeepSeek API 无状态，多轮上下文由前端每次全量传入并拼入 messages
-        messages.addAll(truncateHistory(history));
+        // 摘要作为 system 消息注入，用标签包裹便于模型识别边界，不与检索 system 冲突
+        if (effectiveSummary != null && !effectiveSummary.isBlank()) {
+            messages.add(Map.of("role", "system", "content",
+                    "<conversation-summary>\n" + effectiveSummary + "\n</conversation-summary>"));
+        }
+        messages.addAll(recentHistory);
         messages.add(Map.of("role", "user", "content", question));
 
         Map<String, Object> requestBody = Map.of(
@@ -233,5 +266,71 @@ public class ChatService {
             result.remove(0);
         }
         return result;
+    }
+
+    /** 用 LLM 把早期对话压成摘要，通过 event:summary 下发前端持久化；失败返回 null，调用方回退为全量原文。 */
+    private String generateSummary(List<Map<String, String>> earlyMessages, SseEmitter emitter) {
+        List<Map<String, String>> summaryMessages = new ArrayList<>();
+        summaryMessages.add(Map.of("role", "system", "content", SUMMARY_PROMPT));
+        summaryMessages.addAll(earlyMessages);
+        summaryMessages.add(Map.of("role", "user", "content", "请输出对话摘要。"));
+
+        Map<String, Object> requestBody = Map.of(
+                "model", llmProperties.getModelName(),
+                "stream", false,
+                "messages", summaryMessages
+        );
+
+        try {
+            String response = webClient.post()
+                    .uri(llmProperties.getBaseUrl() + "/chat/completions")
+                    .header("Authorization", "Bearer " + llmProperties.getApiKey())
+                    .header("Content-Type", "application/json")
+                    .bodyValue(requestBody)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+            if (response == null) {
+                return null;
+            }
+            // 非流式响应：{"choices":[{"message":{"content":"..."}}]}
+            String content = extractContent(response);
+            if (content == null || content.isBlank()) {
+                return null;
+            }
+            log.info("生成对话摘要，{} 字", content.length());
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("summary")
+                        .data(Map.of("summary", content), MediaType.APPLICATION_JSON));
+            } catch (IOException e) {
+                log.warn("摘要事件发送失败，客户端可能已断开", e);
+            }
+            return content;
+        } catch (Exception e) {
+            log.warn("对话摘要生成失败，回退为全量原文", e);
+            return null;
+        }
+    }
+
+    /** 从非流式 LLM 响应中提取 message.content。 */
+    private String extractContent(String response) {
+        try {
+            // 用 Jackson 解析，但项目未显式依赖 ObjectMapper 注入，走字符串查找避免新增依赖
+            int contentIdx = response.indexOf("\"content\":\"");
+            if (contentIdx < 0) {
+                return null;
+            }
+            int start = contentIdx + "\"content\":\"".length();
+            int end = response.indexOf("\"", start);
+            if (end < 0) {
+                return null;
+            }
+            return response.substring(start, end)
+                    .replace("\\n", "\n")
+                    .replace("\\\"", "\"");
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

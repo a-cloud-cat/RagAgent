@@ -1,6 +1,7 @@
 package com.example.rag.service;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -28,6 +30,7 @@ import com.example.rag.config.LlmProperties;
 import com.example.rag.model.Chunk;
 
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 class ChatServiceTest {
 
@@ -39,6 +42,8 @@ class ChatServiceTest {
 
     private WebClient.RequestBodySpec bodySpec;
 
+    private WebClient.ResponseSpec responseSpec;
+
     private ChatService service;
 
     @BeforeEach
@@ -48,7 +53,7 @@ class ChatServiceTest {
         WebClient.RequestBodyUriSpec uriSpec = mock(WebClient.RequestBodyUriSpec.class);
         bodySpec = mock(WebClient.RequestBodySpec.class);
         WebClient.RequestHeadersSpec headersSpec = mock(WebClient.RequestHeadersSpec.class);
-        WebClient.ResponseSpec responseSpec = mock(WebClient.ResponseSpec.class);
+        responseSpec = mock(WebClient.ResponseSpec.class);
 
         when(webClient.post()).thenReturn(uriSpec);
         when(uriSpec.uri(anyString())).thenReturn(bodySpec);
@@ -81,7 +86,7 @@ class ChatServiceTest {
         doThrow(new IOException("客户端断开")).when(emitter).send(any(String.class));
 
         // skipRetrieval=true 绕开检索，直接进入 LLM 流式分支
-        assertDoesNotThrow(() -> service.streamChat("问题", emitter, true, List.of()));
+        assertDoesNotThrow(() -> service.streamChat("问题", emitter, true, List.of(), null));
 
         verify(emitter).completeWithError(any(IOException.class));
     }
@@ -96,7 +101,7 @@ class ChatServiceTest {
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false, List.of());
+        service.streamChat("问题", emitter, false, List.of(), null);
 
         ArgumentCaptor<SseEmitter.SseEventBuilder> captor =
                 ArgumentCaptor.forClass(SseEmitter.SseEventBuilder.class);
@@ -129,7 +134,7 @@ class ChatServiceTest {
                 .thenReturn(new RetrievalOutcome(List.of(), 0.1, false));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false, List.of());
+        service.streamChat("问题", emitter, false, List.of(), null);
 
         // 拦截走 refuse：只发 Object 类型的拒答文案，不发 SseEventBuilder 命名事件
         verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
@@ -139,7 +144,7 @@ class ChatServiceTest {
     @Test
     void 跳过检索时不下发来源事件() throws IOException {
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, true, List.of());
+        service.streamChat("问题", emitter, true, List.of(), null);
 
         verify(retrievalService, never()).retrieve(anyString());
         verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
@@ -156,7 +161,7 @@ class ChatServiceTest {
         SseEmitter emitter = mock(SseEmitter.class);
         doThrow(new IOException("客户端断开")).when(emitter).send(any(SseEmitter.SseEventBuilder.class));
 
-        service.streamChat("问题", emitter, false, List.of());
+        service.streamChat("问题", emitter, false, List.of(), null);
 
         verify(emitter).completeWithError(any(IOException.class));
         verify(webClient, never()).post();
@@ -172,7 +177,7 @@ class ChatServiceTest {
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false, List.of());
+        service.streamChat("问题", emitter, false, List.of(), null);
 
         ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
         verify(bodySpec).bodyValue(bodyCaptor.capture());
@@ -204,7 +209,7 @@ class ChatServiceTest {
         );
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("当前问题", emitter, false, history);
+        service.streamChat("当前问题", emitter, false, history, null);
 
         ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
         verify(bodySpec).bodyValue(bodyCaptor.capture());
@@ -218,5 +223,49 @@ class ChatServiceTest {
         assertEquals("第一轮问题", messages.get(1).get("content"));
         assertEquals("第一轮回答", messages.get(2).get("content"));
         assertEquals("当前问题", messages.get(3).get("content"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void history超阈值且未传summary时生成摘要并作为system拼入messages() throws IOException {
+        Chunk chunk = new Chunk(1L, 0, "正文", null);
+        chunk.setDocumentName("learn.txt");
+        chunk.setScore(0.612);
+        when(retrievalService.retrieve(anyString()))
+                .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
+
+        // 10 轮 = 20 条消息，超过 SUMMARY_TRIGGER_TURNS(8)
+        List<Map<String, String>> history = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            history.add(Map.of("role", "user", "content", "问题" + i));
+            history.add(Map.of("role", "assistant", "content", "回答" + i));
+        }
+
+        // mock 非流式摘要响应
+        when(responseSpec.bodyToMono(String.class))
+                .thenReturn(Mono.just("{\"choices\":[{\"message\":{\"content\":\"早期对话摘要\"}}]}"));
+
+        SseEmitter emitter = mock(SseEmitter.class);
+        service.streamChat("当前问题", emitter, false, history, null);
+
+        ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
+        // 摘要请求 + 主对话请求，bodyValue 至少被调用 2 次
+        verify(bodySpec, atLeast(2)).bodyValue(bodyCaptor.capture());
+
+        // 取最后一次为给主对话的请求体
+        Map<String, Object> body = (Map<String, Object>) bodyCaptor.getAllValues()
+                .get(bodyCaptor.getAllValues().size() - 1);
+        List<Map<String, String>> messages = (List<Map<String, String>>) body.get("messages");
+
+        long systemCount = messages.stream().filter(m -> "system".equals(m.get("role"))).count();
+        assertEquals(2, systemCount, "超阈值时应包含检索 system 与摘要 system 两条消息");
+
+        String summaryContent = messages.stream()
+                .filter(m -> "system".equals(m.get("role")))
+                .map(m -> m.get("content"))
+                .filter(c -> c.contains("conversation-summary"))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(summaryContent.contains("早期对话摘要"), "摘要 system 应包含生成的摘要文本");
     }
 }

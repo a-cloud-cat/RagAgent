@@ -68,7 +68,7 @@ class RetrievalServiceTest {
         rerankProperties.setEnabled(false);
         stubRerank(0.1);
 
-        RetrievalOutcome outcome = service.retrieve("问题");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
 
         assertTrue(outcome.isEvidenceReady());
         assertEquals(3, outcome.getChunks().size());
@@ -79,7 +79,7 @@ class RetrievalServiceTest {
         rerankProperties.setEnabled(true);
         stubRerank(0.9);
 
-        RetrievalOutcome outcome = service.retrieve("问题");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
 
         assertTrue(outcome.isEvidenceReady());
         assertEquals(0.9, outcome.getTop1Score(), 1e-9);
@@ -90,7 +90,7 @@ class RetrievalServiceTest {
         rerankProperties.setEnabled(true);
         stubRerank(0.2);
 
-        RetrievalOutcome outcome = service.retrieve("问题");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
 
         assertFalse(outcome.isEvidenceReady());
         // 拦截不丢召回块，闸门只是标记，拒答由上层决定
@@ -102,7 +102,7 @@ class RetrievalServiceTest {
         rerankProperties.setEnabled(true);
         stubRerank(retrievalProperties.getEvidenceThreshold());
 
-        RetrievalOutcome outcome = service.retrieve("问题");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
 
         assertTrue(outcome.isEvidenceReady());
     }
@@ -113,7 +113,7 @@ class RetrievalServiceTest {
         when(rerankClient.rerank(any(), anyList(), anyInt()))
                 .thenThrow(new IllegalStateException("rerank 挂了"));
 
-        RetrievalOutcome outcome = service.retrieve("问题");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
 
         assertTrue(outcome.isEvidenceReady());
         assertEquals(3, outcome.getChunks().size());
@@ -123,7 +123,7 @@ class RetrievalServiceTest {
     void 无候选时按无证据处理() {
         when(chunkRepository.search(any(float[].class), anyInt())).thenReturn(List.of());
 
-        RetrievalOutcome outcome = service.retrieve("问题");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
 
         assertTrue(outcome.getChunks().isEmpty());
         assertFalse(outcome.isEvidenceReady());

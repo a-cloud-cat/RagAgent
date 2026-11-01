@@ -64,12 +64,16 @@ public class ChatService {
 
     private final RetrievalService retrievalService;
 
+    private final QueryRewriteService queryRewriteService;
+
     public ChatService(WebClient webClient,
                        LlmProperties llmProperties,
-                       RetrievalService retrievalService) {
+                       RetrievalService retrievalService,
+                       QueryRewriteService queryRewriteService) {
         this.webClient = webClient;
         this.llmProperties = llmProperties;
         this.retrievalService = retrievalService;
+        this.queryRewriteService = queryRewriteService;
     }
 
     public void streamChat(String question, SseEmitter emitter, boolean skipRetrieval,
@@ -77,12 +81,19 @@ public class ChatService {
         List<Chunk> retrieved = List.of();
         RetrievalOutcome outcome = null;
 
+        // 改写和主对话共用同一份截断历史，避免改写请求带全量历史多花 token
+        List<Map<String, String>> truncated = truncateHistory(history);
+        // 检索用改写后的问题（补全追问指代），用户消息和 messages 仍用原问题
+        String queryForRetrieval = skipRetrieval
+                ? question
+                : queryRewriteService.rewrite(question, truncated);
+
         if (skipRetrieval) {
             log.info("用户已确认知识库不可用，跳过检索，按普通对话处理");
         } else {
             try {
                 // 检索链路：向量化 → 候选召回 → Rerank → 截 topK → 证据闸门
-                outcome = retrievalService.retrieve(question);
+                outcome = retrievalService.retrieve(queryForRetrieval);
             } catch (Exception e) {
                 // 请求中途才暴露的故障（DB 断开、embedding 失败）：通知前端后降级为裸 LLM
                 log.error("检索链路失败，降级为普通对话", e);
@@ -126,7 +137,6 @@ public class ChatService {
             }
         }
 
-        List<Map<String, String>> truncated = truncateHistory(history);
         int historyTurns = truncated.size() / 2;
 
         // history 超阈值时用摘要替代早期原文，近期保留 RECENT_KEEP_TURNS 轮

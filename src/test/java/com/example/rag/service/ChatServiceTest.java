@@ -40,6 +40,8 @@ class ChatServiceTest {
 
     private RetrievalService retrievalService;
 
+    private QueryRewriteService queryRewriteService;
+
     private WebClient.RequestBodySpec bodySpec;
 
     private WebClient.ResponseSpec responseSpec;
@@ -67,7 +69,10 @@ class ChatServiceTest {
         llmProperties.setApiKey("key");
         llmProperties.setModelName("model");
         retrievalService = mock(RetrievalService.class);
-        service = new ChatService(webClient, llmProperties, retrievalService);
+        // 默认改写直接回退原问题，既有测试行为不变
+        queryRewriteService = mock(QueryRewriteService.class);
+        when(queryRewriteService.rewrite(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        service = new ChatService(webClient, llmProperties, retrievalService, queryRewriteService);
     }
 
     @Test
@@ -267,5 +272,43 @@ class ChatServiceTest {
                 .findFirst()
                 .orElseThrow();
         assertTrue(summaryContent.contains("早期对话摘要"), "摘要 system 应包含生成的摘要文本");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void 历史非空时检索用改写后的问题且用户消息仍是原问题() throws IOException {
+        Chunk chunk = new Chunk(1L, 0, "正文", null);
+        chunk.setDocumentName("learn.txt");
+        chunk.setScore(0.612);
+        when(retrievalService.retrieve(anyString()))
+                .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
+
+        List<Map<String, String>> history = List.of(
+                Map.of("role", "user", "content", "Spring Boot 的自动配置是什么？"),
+                Map.of("role", "assistant", "content", "自动配置是……")
+        );
+        when(queryRewriteService.rewrite("它怎么工作", history))
+                .thenReturn("Spring Boot 的自动配置是怎么工作的？");
+
+        SseEmitter emitter = mock(SseEmitter.class);
+        service.streamChat("它怎么工作", emitter, false, history, null);
+
+        // 检索用的是改写后的问题
+        ArgumentCaptor<String> queryCaptor = ArgumentCaptor.forClass(String.class);
+        verify(retrievalService).retrieve(queryCaptor.capture());
+        assertEquals("Spring Boot 的自动配置是怎么工作的？", queryCaptor.getValue(),
+                "检索 query 应为改写后的完整问题");
+
+        // 拼给 LLM 的用户消息仍是原问题，不改用户看到的内容
+        ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(bodySpec).bodyValue(bodyCaptor.capture());
+        Map<String, Object> body = (Map<String, Object>) bodyCaptor.getValue();
+        List<Map<String, String>> messages = (List<Map<String, String>>) body.get("messages");
+        String lastUserContent = messages.stream()
+                .filter(m -> "user".equals(m.get("role")))
+                .reduce((first, second) -> second)
+                .map(m -> m.get("content"))
+                .orElseThrow();
+        assertEquals("它怎么工作", lastUserContent, "LLM messages 里的用户消息应为原问题");
     }
 }

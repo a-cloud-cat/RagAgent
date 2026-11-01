@@ -77,26 +77,31 @@ public class ChatService {
     }
 
     public void streamChat(String question, SseEmitter emitter, boolean skipRetrieval,
-                           List<Map<String, String>> history, String summary) {
+                           List<Map<String, String>> history, String summary, String traceId) {
+        long start = System.currentTimeMillis();
         List<Chunk> retrieved = List.of();
         RetrievalOutcome outcome = null;
 
         // 改写和主对话共用同一份截断历史，避免改写请求带全量历史多花 token
         List<Map<String, String>> truncated = truncateHistory(history);
         // 检索用改写后的问题（补全追问指代），用户消息和 messages 仍用原问题
-        String queryForRetrieval = skipRetrieval
-                ? question
-                : queryRewriteService.rewrite(question, truncated);
+        String queryForRetrieval = question;
+        if (!skipRetrieval) {
+            long tRewrite = System.currentTimeMillis();
+            queryForRetrieval = queryRewriteService.rewrite(question, truncated);
+            log.info("[traceId={}] 阶段=改写 耗时={}ms 「{}」→「{}」",
+                    traceId, System.currentTimeMillis() - tRewrite, question, queryForRetrieval);
+        }
 
         if (skipRetrieval) {
-            log.info("用户已确认知识库不可用，跳过检索，按普通对话处理");
+            log.info("[traceId={}] 跳过检索，按普通对话处理", traceId);
         } else {
             try {
                 // 检索链路：向量化 → 候选召回 → Rerank → 截 topK → 证据闸门
-                outcome = retrievalService.retrieve(queryForRetrieval);
+                outcome = retrievalService.retrieve(queryForRetrieval, traceId);
             } catch (Exception e) {
                 // 请求中途才暴露的故障（DB 断开、embedding 失败）：通知前端后降级为裸 LLM
-                log.error("检索链路失败，降级为普通对话", e);
+                log.error("[traceId={}] 检索链路失败，降级为普通对话", traceId, e);
                 try {
                     emitter.send(SseEmitter.event()
                             .name("degraded")
@@ -112,16 +117,16 @@ public class ChatService {
         if (outcome != null) {
             retrieved = outcome.getChunks();
             if (!outcome.isEvidenceReady()) {
-                log.info("证据闸门拦截，固定拒答：top1={}",
-                        String.format("%.3f", outcome.getTop1Score()));
-                refuse(emitter);
+                log.info("[traceId={}] 证据闸门拦截，固定拒答：top1={}",
+                        traceId, String.format("%.3f", outcome.getTop1Score()));
+                refuse(emitter, traceId);
                 return;
             }
         }
 
         if (!retrieved.isEmpty()) {
-            log.info("召回 {} 个分块，相似度：{}",
-                    retrieved.size(),
+            log.info("[traceId={}] 召回 {} 个分块，相似度：{}",
+                    traceId, retrieved.size(),
                     retrieved.stream()
                             .map(c -> String.format("%.3f", c.getScore()))
                             .collect(Collectors.joining(", ")));
@@ -147,7 +152,7 @@ public class ChatService {
             List<Map<String, String>> earlyMessages = truncated.subList(0, truncated.size() - recentCount);
             recentHistory = new ArrayList<>(truncated.subList(truncated.size() - recentCount, truncated.size()));
             if (effectiveSummary == null || effectiveSummary.isBlank()) {
-                effectiveSummary = generateSummary(earlyMessages, emitter);
+                effectiveSummary = generateSummary(earlyMessages, emitter, traceId);
             }
         }
 
@@ -182,12 +187,17 @@ public class ChatService {
         AtomicReference<Disposable> subscriptionRef = new AtomicReference<>();
         // 区分正常结束与客户端中途断开：onCompletion 两种情况都会触发
         AtomicBoolean completedNormally = new AtomicBoolean(false);
+        long genStart = System.currentTimeMillis();
+        AtomicBoolean firstTokenLogged = new AtomicBoolean(false);
         Disposable subscription = flux.subscribe(
                 chunk -> {
+                    if (firstTokenLogged.compareAndSet(false, true)) {
+                        log.info("[traceId={}] 阶段=首token 耗时={}ms", traceId, System.currentTimeMillis() - genStart);
+                    }
                     try {
                         emitter.send(chunk);
                     } catch (IOException e) {
-                        log.warn("SSE 发送失败，客户端可能已断开，取消上游订阅", e);
+                        log.warn("[traceId={}] SSE 发送失败，客户端可能已断开，取消上游订阅", traceId, e);
                         // subscribe() 返回前同步源可能已触发回调，此时句柄尚未入槽
                         Disposable current = subscriptionRef.get();
                         if (current != null) {
@@ -197,11 +207,13 @@ public class ChatService {
                     }
                 },
                 e -> {
-                    log.error("上游 LLM 流式调用失败", e);
+                    log.error("[traceId={}] 上游 LLM 流式调用失败", traceId, e);
                     emitter.completeWithError(e);
                 },
                 () -> {
                     completedNormally.set(true);
+                    log.info("[traceId={}] 阶段=生成 耗时={}ms 总耗时={}ms",
+                            traceId, System.currentTimeMillis() - genStart, System.currentTimeMillis() - start);
                     emitter.complete();
                 }
         );
@@ -209,29 +221,29 @@ public class ChatService {
 
         emitter.onCompletion(() -> {
             if (!completedNormally.get()) {
-                log.info("客户端断开 SSE，取消上游订阅");
+                log.info("[traceId={}] 客户端断开 SSE，取消上游订阅", traceId);
             }
             subscription.dispose();
         });
         emitter.onTimeout(() -> {
-            log.warn("SSE 连接超时，取消上游订阅");
+            log.warn("[traceId={}] SSE 连接超时，取消上游订阅", traceId);
             subscription.dispose();
         });
         emitter.onError(e -> {
-            log.debug("SSE 异步错误回调：{}", e.toString());
+            log.debug("[traceId={}] SSE 异步错误回调：{}", traceId, e.toString());
             subscription.dispose();
         });
     }
 
     /** 闸门拦截：按上游同款 OpenAI SSE 协议吐一条固定文本后收尾，前端无需感知闸门。 */
-    private void refuse(SseEmitter emitter) {
+    private void refuse(SseEmitter emitter, String traceId) {
         try {
             emitter.send(Map.of("choices", List.of(
                     Map.of("delta", Map.of("content", REFUSAL)))));
             emitter.send("[DONE]");
             emitter.complete();
         } catch (IOException e) {
-            log.warn("拒答消息发送失败，客户端可能已断开", e);
+            log.warn("[traceId={}] 拒答消息发送失败，客户端可能已断开", traceId, e);
             emitter.completeWithError(e);
         }
     }
@@ -279,7 +291,7 @@ public class ChatService {
     }
 
     /** 用 LLM 把早期对话压成摘要，通过 event:summary 下发前端持久化；失败返回 null，调用方回退为全量原文。 */
-    private String generateSummary(List<Map<String, String>> earlyMessages, SseEmitter emitter) {
+    private String generateSummary(List<Map<String, String>> earlyMessages, SseEmitter emitter, String traceId) {
         List<Map<String, String>> summaryMessages = new ArrayList<>();
         summaryMessages.add(Map.of("role", "system", "content", SUMMARY_PROMPT));
         summaryMessages.addAll(earlyMessages);
@@ -292,6 +304,7 @@ public class ChatService {
         );
 
         try {
+            long tSummary = System.currentTimeMillis();
             String response = webClient.post()
                     .uri(llmProperties.getBaseUrl() + "/chat/completions")
                     .header("Authorization", "Bearer " + llmProperties.getApiKey())
@@ -308,17 +321,17 @@ public class ChatService {
             if (content == null || content.isBlank()) {
                 return null;
             }
-            log.info("生成对话摘要，{} 字", content.length());
+            log.info("[traceId={}] 阶段=摘要 耗时={}ms {} 字", traceId, System.currentTimeMillis() - tSummary, content.length());
             try {
                 emitter.send(SseEmitter.event()
                         .name("summary")
                         .data(Map.of("summary", content), MediaType.APPLICATION_JSON));
             } catch (IOException e) {
-                log.warn("摘要事件发送失败，客户端可能已断开", e);
+                log.warn("[traceId={}] 摘要事件发送失败，客户端可能已断开", traceId, e);
             }
             return content;
         } catch (Exception e) {
-            log.warn("对话摘要生成失败，回退为全量原文", e);
+            log.warn("[traceId={}] 对话摘要生成失败，回退为全量原文", traceId, e);
             return null;
         }
     }

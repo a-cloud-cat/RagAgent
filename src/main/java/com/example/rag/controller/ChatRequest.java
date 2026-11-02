@@ -15,6 +15,9 @@ public class ChatRequest {
     // 早期对话的摘要，由前端从 localStorage 传入；无则为 null
     private String summary;
 
+    // 是否开启回答后的追问推荐，前端设置面板控制，默认开启
+    private boolean enableRecommend = true;
+
     public String getQuestion() {
         return question;
     }
@@ -45,5 +48,13 @@ public class ChatRequest {
 
     public void setSummary(String summary) {
         this.summary = summary;
+    }
+
+    public boolean isEnableRecommend() {
+        return enableRecommend;
+    }
+
+    public void setEnableRecommend(boolean enableRecommend) {
+        this.enableRecommend = enableRecommend;
     }
 }

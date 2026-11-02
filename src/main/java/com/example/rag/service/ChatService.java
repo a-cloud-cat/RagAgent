@@ -66,18 +66,23 @@ public class ChatService {
 
     private final QueryRewriteService queryRewriteService;
 
+    private final RecommendedQuestionService recommendedQuestionService;
+
     public ChatService(WebClient webClient,
                        LlmProperties llmProperties,
                        RetrievalService retrievalService,
-                       QueryRewriteService queryRewriteService) {
+                       QueryRewriteService queryRewriteService,
+                       RecommendedQuestionService recommendedQuestionService) {
         this.webClient = webClient;
         this.llmProperties = llmProperties;
         this.retrievalService = retrievalService;
         this.queryRewriteService = queryRewriteService;
+        this.recommendedQuestionService = recommendedQuestionService;
     }
 
     public void streamChat(String question, SseEmitter emitter, boolean skipRetrieval,
-                           List<Map<String, String>> history, String summary, String traceId) {
+                           List<Map<String, String>> history, String summary, String traceId,
+                           boolean enableRecommend) {
         long start = System.currentTimeMillis();
         List<Chunk> retrieved = List.of();
         RetrievalOutcome outcome = null;
@@ -189,10 +194,17 @@ public class ChatService {
         AtomicBoolean completedNormally = new AtomicBoolean(false);
         long genStart = System.currentTimeMillis();
         AtomicBoolean firstTokenLogged = new AtomicBoolean(false);
+        // 累积答案正文，生成结束后用于追问推荐
+        StringBuilder answerBuf = new StringBuilder();
         Disposable subscription = flux.subscribe(
                 chunk -> {
                     if (firstTokenLogged.compareAndSet(false, true)) {
                         log.info("[traceId={}] 阶段=首token 耗时={}ms", traceId, System.currentTimeMillis() - genStart);
+                    }
+                    // 从流式 chunk 里提取 delta.content 累积，用于后续推荐
+                    String delta = extractContent(chunk);
+                    if (delta != null) {
+                        answerBuf.append(delta);
                     }
                     try {
                         emitter.send(chunk);
@@ -214,6 +226,19 @@ public class ChatService {
                     completedNormally.set(true);
                     log.info("[traceId={}] 阶段=生成 耗时={}ms 总耗时={}ms",
                             traceId, System.currentTimeMillis() - genStart, System.currentTimeMillis() - start);
+                    // 回答结束后生成追问推荐，事件下发后再关闭连接；失败直接关闭不影响主流程
+                    if (enableRecommend && answerBuf.length() > 0) {
+                        try {
+                            List<String> questions = recommendedQuestionService.recommend(question, answerBuf.toString());
+                            if (!questions.isEmpty()) {
+                                emitter.send(SseEmitter.event()
+                                        .name("recommend")
+                                        .data(Map.of("questions", questions), MediaType.APPLICATION_JSON));
+                            }
+                        } catch (Exception ex) {
+                            log.warn("[traceId={}] 推荐问题下发失败", traceId, ex);
+                        }
+                    }
                     emitter.complete();
                 }
         );

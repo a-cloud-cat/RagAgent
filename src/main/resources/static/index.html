@@ -185,6 +185,42 @@
             background: #dbeafe;
             border-color: #93c5fd;
         }
+        .settings-panel {
+            position: absolute;
+            top: 48px;
+            right: 20px;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            z-index: 100;
+        }
+        .setting-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #374151;
+            cursor: pointer;
+        }
+        .recommend-list {
+            margin-top: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .recommend-item {
+            font-size: 13px;
+            color: #2563eb;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: #f8fafc;
+        }
+        .recommend-item:hover {
+            background: #eff6ff;
+        }
         details.sources {
             margin-top: 10px;
             border-top: 1px dashed #e5e7eb;
@@ -268,7 +304,13 @@
     </style>
 </head>
 <body>
-<header><span>RAG 智能助手</span><button id="doc-manage-btn" class="doc-btn">文档</button></header>
+<header><span>RAG 智能助手</span><button id="doc-manage-btn" class="doc-btn">文档</button><button id="settings-btn" class="doc-btn" title="设置">⚙️</button></header>
+<div id="settings-panel" class="settings-panel" style="display:none;">
+    <label class="setting-row">
+        <input type="checkbox" id="recommend-toggle" checked>
+        <span>开启追问推荐</span>
+    </label>
+</div>
 <div id="messages">
     <div class="hint">在下方输入问题开始对话（接口 POST /chat，SSE 流式返回）</div>
 </div>
@@ -350,6 +392,23 @@
     let pricingInfo = null;
     // 当前进行中请求的取消句柄，空闲为 null；供终止按钮跨事件访问
     let currentAbort = null;
+
+    // 设置面板：追问推荐开关，偏好存 localStorage
+    const settingsBtn = document.getElementById('settings-btn');
+    const settingsPanel = document.getElementById('settings-panel');
+    const recommendToggle = document.getElementById('recommend-toggle');
+    recommendToggle.checked = localStorage.getItem('recommend-enabled') !== 'false';
+    settingsBtn.addEventListener('click', () => {
+        settingsPanel.style.display = settingsPanel.style.display === 'none' ? 'block' : 'none';
+    });
+    recommendToggle.addEventListener('change', () => {
+        localStorage.setItem('recommend-enabled', recommendToggle.checked);
+    });
+    document.addEventListener('click', (e) => {
+        if (!settingsPanel.contains(e.target) && e.target !== settingsBtn) {
+            settingsPanel.style.display = 'none';
+        }
+    });
 
     inputEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -714,7 +773,7 @@
             const resp = await fetch('/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question, skipRetrieval, history, summary }),
+                body: JSON.stringify({ question, skipRetrieval, history, summary, enableRecommend: recommendToggle.checked }),
                 signal: abortController.signal
             });
             if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
@@ -767,6 +826,11 @@
                     }
                     if (eventName === 'summary') {
                         if (json.summary) localStorage.setItem('chat-summary', json.summary);
+                        eventName = '';
+                        continue;
+                    }
+                    if (eventName === 'recommend') {
+                        renderRecommend(bubble, json.questions);
                         eventName = '';
                         continue;
                     }
@@ -845,6 +909,21 @@
             }
             up.addEventListener('click', () => submit('UP'));
             down.addEventListener('click', () => submit('DOWN'));
+        }
+
+        // 渲染追问推荐列表，点击直接发送
+        function renderRecommend(bubble, questions) {
+            if (!questions || !questions.length) return;
+            const list = document.createElement('div');
+            list.className = 'recommend-list';
+            questions.forEach(q => {
+                const item = document.createElement('div');
+                item.className = 'recommend-item';
+                item.textContent = q;
+                item.addEventListener('click', () => runTurn(q, null));
+                list.appendChild(item);
+            });
+            bubble.appendChild(list);
         }
     }
 </script>

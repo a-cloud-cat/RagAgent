@@ -43,6 +43,8 @@ class ChatServiceTest {
 
     private QueryRewriteService queryRewriteService;
 
+    private RecommendedQuestionService recommendedQuestionService;
+
     private WebClient.RequestBodySpec bodySpec;
 
     private WebClient.ResponseSpec responseSpec;
@@ -73,7 +75,8 @@ class ChatServiceTest {
         // 默认改写直接回退原问题，既有测试行为不变
         queryRewriteService = mock(QueryRewriteService.class);
         when(queryRewriteService.rewrite(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
-        service = new ChatService(webClient, llmProperties, retrievalService, queryRewriteService);
+        recommendedQuestionService = mock(RecommendedQuestionService.class);
+        service = new ChatService(webClient, llmProperties, retrievalService, queryRewriteService, recommendedQuestionService);
     }
 
     @Test
@@ -92,7 +95,7 @@ class ChatServiceTest {
         doThrow(new IOException("客户端断开")).when(emitter).send(any(String.class));
 
         // skipRetrieval=true 绕开检索，直接进入 LLM 流式分支
-        assertDoesNotThrow(() -> service.streamChat("问题", emitter, true, List.of(), null, "test-trace"));
+        assertDoesNotThrow(() -> service.streamChat("问题", emitter, true, List.of(), null, "test-trace", false));
 
         verify(emitter).completeWithError(any(IOException.class));
     }
@@ -107,7 +110,7 @@ class ChatServiceTest {
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false, List.of(), null, "test-trace");
+        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false);
 
         ArgumentCaptor<SseEmitter.SseEventBuilder> captor =
                 ArgumentCaptor.forClass(SseEmitter.SseEventBuilder.class);
@@ -140,7 +143,7 @@ class ChatServiceTest {
                 .thenReturn(new RetrievalOutcome(List.of(), 0.1, false));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false, List.of(), null, "test-trace");
+        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false);
 
         // 拦截走 refuse：只发 Object 类型的拒答文案，不发 SseEventBuilder 命名事件
         verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
@@ -150,7 +153,7 @@ class ChatServiceTest {
     @Test
     void 跳过检索时不下发来源事件() throws IOException {
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, true, List.of(), null, "test-trace");
+        service.streamChat("问题", emitter, true, List.of(), null, "test-trace", false);
 
         verify(retrievalService, never()).retrieve(anyString(), anyString());
         verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
@@ -167,7 +170,7 @@ class ChatServiceTest {
         SseEmitter emitter = mock(SseEmitter.class);
         doThrow(new IOException("客户端断开")).when(emitter).send(any(SseEmitter.SseEventBuilder.class));
 
-        service.streamChat("问题", emitter, false, List.of(), null, "test-trace");
+        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false);
 
         verify(emitter).completeWithError(any(IOException.class));
         verify(webClient, never()).post();
@@ -183,7 +186,7 @@ class ChatServiceTest {
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false, List.of(), null, "test-trace");
+        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false);
 
         ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
         verify(bodySpec).bodyValue(bodyCaptor.capture());
@@ -215,7 +218,7 @@ class ChatServiceTest {
         );
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("当前问题", emitter, false, history, null, "test-trace");
+        service.streamChat("当前问题", emitter, false, history, null, "test-trace", false);
 
         ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
         verify(bodySpec).bodyValue(bodyCaptor.capture());
@@ -252,7 +255,7 @@ class ChatServiceTest {
                 .thenReturn(Mono.just("{\"choices\":[{\"message\":{\"content\":\"早期对话摘要\"}}]}"));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("当前问题", emitter, false, history, null, "test-trace");
+        service.streamChat("当前问题", emitter, false, history, null, "test-trace", false);
 
         ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
         // 摘要请求 + 主对话请求，bodyValue 至少被调用 2 次
@@ -292,7 +295,7 @@ class ChatServiceTest {
                 .thenReturn("Spring Boot 的自动配置是怎么工作的？");
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("它怎么工作", emitter, false, history, null, "test-trace");
+        service.streamChat("它怎么工作", emitter, false, history, null, "test-trace", false);
 
         // 检索用的是改写后的问题
         ArgumentCaptor<String> queryCaptor = ArgumentCaptor.forClass(String.class);

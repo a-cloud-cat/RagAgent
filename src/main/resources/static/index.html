@@ -161,6 +161,30 @@
         }
         /* 未调用模型（闸门拒答/中止）时不留空的分隔线 */
         .msg-meta:empty { display: none; }
+        .feedback-bar {
+            margin-top: 8px;
+            display: flex;
+            gap: 6px;
+        }
+        .feedback-bar button {
+            border: 1px solid #e5e7eb;
+            background: #fff;
+            border-radius: 4px;
+            padding: 2px 8px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .feedback-bar button:hover:not(:disabled) {
+            background: #f3f4f6;
+        }
+        .feedback-bar button:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+        .feedback-bar button.active {
+            background: #dbeafe;
+            border-color: #93c5fd;
+        }
         details.sources {
             margin-top: 10px;
             border-top: 1px dashed #e5e7eb;
@@ -785,6 +809,42 @@
             currentAbort = null;
             setStoppingUi(false);
             inputEl.focus();
+            addFeedbackBar(bubble, question);
+        }
+
+        // 回答完成后追加赞/踩按钮，点击后落库并禁用
+        function addFeedbackBar(bubble, question) {
+            const answer = bubble.querySelector('.answer');
+            if (!answer || !answer.textContent.trim()) return;
+
+            const bar = document.createElement('div');
+            bar.className = 'feedback-bar';
+            const up = document.createElement('button');
+            up.textContent = '👍';
+            up.title = '赞';
+            const down = document.createElement('button');
+            down.textContent = '👎';
+            down.title = '踩';
+            bar.appendChild(up);
+            bar.appendChild(down);
+            bubble.appendChild(bar);
+
+            function submit(feedback) {
+                up.disabled = true;
+                down.disabled = true;
+                (feedback === 'UP' ? up : down).classList.add('active');
+                fetch('/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question,
+                        answer: answer.textContent,
+                        feedback
+                    })
+                }).catch(() => { /* 反馈失败不打扰用户，仅控制台可见 */ });
+            }
+            up.addEventListener('click', () => submit('UP'));
+            down.addEventListener('click', () => submit('DOWN'));
         }
     }
 </script>

@@ -32,3 +32,14 @@ CREATE INDEX IF NOT EXISTS idx_chunk_document ON t_chunk (document_id);
 CREATE INDEX IF NOT EXISTS idx_chunk_embedding_hnsw ON t_chunk USING hnsw (embedding vector_cosine_ops);
 COMMENT ON TABLE t_chunk IS '文档分块与向量表';
 COMMENT ON COLUMN t_chunk.embedding IS '文本向量（text-embedding-v4，1536 维）';
+
+-- 4) 对话反馈表
+CREATE TABLE IF NOT EXISTS t_feedback (
+    id          BIGSERIAL PRIMARY KEY,
+    question    TEXT        NOT NULL,
+    answer      TEXT        NOT NULL,
+    feedback    VARCHAR(8)  NOT NULL,  -- UP / DOWN
+    create_time TIMESTAMP   DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE t_feedback IS '对话反馈表';
+COMMENT ON COLUMN t_feedback.feedback IS '反馈类型 UP(赞)/DOWN(踩)';

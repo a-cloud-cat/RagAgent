@@ -77,7 +77,7 @@ public class EvalService {
         for (int i = 0; i < cases.size(); i++) {
             EvalCase evalCase = cases.get(i);
             long start = System.nanoTime();
-            RetrievalOutcome outcome = retrievalService.retrieve(evalCase.getQuestion(), "eval-" + (i + 1));
+            RetrievalOutcome outcome = retrievalService.retrieve(evalCase.getQuestion(), "eval-" + (i + 1), null);
             List<Chunk> retrieved = outcome.getChunks();
             double latencyMs = (System.nanoTime() - start) / 1_000_000.0;
 

@@ -95,7 +95,7 @@ class ChatServiceTest {
         doThrow(new IOException("客户端断开")).when(emitter).send(any(String.class));
 
         // skipRetrieval=true 绕开检索，直接进入 LLM 流式分支
-        assertDoesNotThrow(() -> service.streamChat("问题", emitter, true, List.of(), null, "test-trace", false));
+        assertDoesNotThrow(() -> service.streamChat("问题", emitter, true, List.of(), null, "test-trace", false, null));
 
         verify(emitter).completeWithError(any(IOException.class));
     }
@@ -106,11 +106,11 @@ class ChatServiceTest {
         Chunk chunk = new Chunk(1L, 2, "分块正文", null);
         chunk.setDocumentName("learn.txt");
         chunk.setScore(0.612);
-        when(retrievalService.retrieve(anyString(), anyString()))
+        when(retrievalService.retrieve(anyString(), anyString(), any()))
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false);
+        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false, null);
 
         ArgumentCaptor<SseEmitter.SseEventBuilder> captor =
                 ArgumentCaptor.forClass(SseEmitter.SseEventBuilder.class);
@@ -139,11 +139,11 @@ class ChatServiceTest {
 
     @Test
     void 证据闸门拦截时不下发来源也不调用模型() throws IOException {
-        when(retrievalService.retrieve(anyString(), anyString()))
+        when(retrievalService.retrieve(anyString(), anyString(), any()))
                 .thenReturn(new RetrievalOutcome(List.of(), 0.1, false));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false);
+        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false, null);
 
         // 拦截走 refuse：只发 Object 类型的拒答文案，不发 SseEventBuilder 命名事件
         verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
@@ -153,9 +153,9 @@ class ChatServiceTest {
     @Test
     void 跳过检索时不下发来源事件() throws IOException {
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, true, List.of(), null, "test-trace", false);
+        service.streamChat("问题", emitter, true, List.of(), null, "test-trace", false, null);
 
-        verify(retrievalService, never()).retrieve(anyString(), anyString());
+        verify(retrievalService, never()).retrieve(anyString(), anyString(), any());
         verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
     }
 
@@ -164,13 +164,13 @@ class ChatServiceTest {
         Chunk chunk = new Chunk(1L, 0, "正文", null);
         chunk.setDocumentName("learn.txt");
         chunk.setScore(0.612);
-        when(retrievalService.retrieve(anyString(), anyString()))
+        when(retrievalService.retrieve(anyString(), anyString(), any()))
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         SseEmitter emitter = mock(SseEmitter.class);
         doThrow(new IOException("客户端断开")).when(emitter).send(any(SseEmitter.SseEventBuilder.class));
 
-        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false);
+        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false, null);
 
         verify(emitter).completeWithError(any(IOException.class));
         verify(webClient, never()).post();
@@ -182,11 +182,11 @@ class ChatServiceTest {
         Chunk chunk = new Chunk(1L, 0, "正文", null);
         chunk.setDocumentName("learn.txt");
         chunk.setScore(0.612);
-        when(retrievalService.retrieve(anyString(), anyString()))
+        when(retrievalService.retrieve(anyString(), anyString(), any()))
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false);
+        service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false, null);
 
         ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
         verify(bodySpec).bodyValue(bodyCaptor.capture());
@@ -209,7 +209,7 @@ class ChatServiceTest {
         Chunk chunk = new Chunk(1L, 0, "正文", null);
         chunk.setDocumentName("learn.txt");
         chunk.setScore(0.612);
-        when(retrievalService.retrieve(anyString(), anyString()))
+        when(retrievalService.retrieve(anyString(), anyString(), any()))
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         List<Map<String, String>> history = List.of(
@@ -218,7 +218,7 @@ class ChatServiceTest {
         );
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("当前问题", emitter, false, history, null, "test-trace", false);
+        service.streamChat("当前问题", emitter, false, history, null, "test-trace", false, null);
 
         ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
         verify(bodySpec).bodyValue(bodyCaptor.capture());
@@ -240,7 +240,7 @@ class ChatServiceTest {
         Chunk chunk = new Chunk(1L, 0, "正文", null);
         chunk.setDocumentName("learn.txt");
         chunk.setScore(0.612);
-        when(retrievalService.retrieve(anyString(), anyString()))
+        when(retrievalService.retrieve(anyString(), anyString(), any()))
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         // 10 轮 = 20 条消息，超过 SUMMARY_TRIGGER_TURNS(8)
@@ -255,7 +255,7 @@ class ChatServiceTest {
                 .thenReturn(Mono.just("{\"choices\":[{\"message\":{\"content\":\"早期对话摘要\"}}]}"));
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("当前问题", emitter, false, history, null, "test-trace", false);
+        service.streamChat("当前问题", emitter, false, history, null, "test-trace", false, null);
 
         ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
         // 摘要请求 + 主对话请求，bodyValue 至少被调用 2 次
@@ -284,7 +284,7 @@ class ChatServiceTest {
         Chunk chunk = new Chunk(1L, 0, "正文", null);
         chunk.setDocumentName("learn.txt");
         chunk.setScore(0.612);
-        when(retrievalService.retrieve(anyString(), anyString()))
+        when(retrievalService.retrieve(anyString(), anyString(), any()))
                 .thenReturn(new RetrievalOutcome(List.of(chunk), 0.612, true));
 
         List<Map<String, String>> history = List.of(
@@ -295,11 +295,11 @@ class ChatServiceTest {
                 .thenReturn("Spring Boot 的自动配置是怎么工作的？");
 
         SseEmitter emitter = mock(SseEmitter.class);
-        service.streamChat("它怎么工作", emitter, false, history, null, "test-trace", false);
+        service.streamChat("它怎么工作", emitter, false, history, null, "test-trace", false, null);
 
         // 检索用的是改写后的问题
         ArgumentCaptor<String> queryCaptor = ArgumentCaptor.forClass(String.class);
-        verify(retrievalService).retrieve(queryCaptor.capture(), eq("test-trace"));
+        verify(retrievalService).retrieve(queryCaptor.capture(), eq("test-trace"), any());
         assertEquals("Spring Boot 的自动配置是怎么工作的？", queryCaptor.getValue(),
                 "检索 query 应为改写后的完整问题");
 

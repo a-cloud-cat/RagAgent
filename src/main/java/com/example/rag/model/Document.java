@@ -22,6 +22,9 @@ public class Document {
     /** 该文档已入库且未删除的分块数 */
     private Integer chunkCount;
 
+    /** 归属知识库（可空，null 表示全库可见） */
+    private Long knowledgeBaseId;
+
     public Long getId() {
         return id;
     }
@@ -60,5 +63,13 @@ public class Document {
 
     public void setChunkCount(Integer chunkCount) {
         this.chunkCount = chunkCount;
+    }
+
+    public Long getKnowledgeBaseId() {
+        return knowledgeBaseId;
+    }
+
+    public void setKnowledgeBaseId(Long knowledgeBaseId) {
+        this.knowledgeBaseId = knowledgeBaseId;
     }
 }

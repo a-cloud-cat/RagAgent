@@ -49,7 +49,7 @@ public class RetrievalService {
      * Rerank 异常时降级为向量原始顺序前 top-k，并放行（故障期沿用带资料回答）。
      * traceId 仅用于把各阶段耗时日志串到同一次问答。
      */
-    public RetrievalOutcome retrieve(String query, String traceId) {
+    public RetrievalOutcome retrieve(String query, String traceId, Long knowledgeBaseId) {
         long start = System.currentTimeMillis();
         int candidateLimit = retrievalProperties.getCandidateLimit();
         int topK = retrievalProperties.getTopK();
@@ -59,10 +59,10 @@ public class RetrievalService {
         float[] queryVector = embeddingClient.embed(List.of(query)).get(0);
         log.info("[traceId={}] 阶段=向量化 耗时={}ms", traceId, System.currentTimeMillis() - t0);
 
-        // 2. 候选召回（取 candidateLimit 条）
+        // 2. 候选召回（取 candidateLimit 条，可选知识库过滤）
         long t1 = System.currentTimeMillis();
-        List<Chunk> candidates = chunkRepository.search(queryVector, candidateLimit);
-        log.info("[traceId={}] 阶段=召回 耗时={}ms 候选数={}", traceId, System.currentTimeMillis() - t1, candidates.size());
+        List<Chunk> candidates = chunkRepository.search(queryVector, candidateLimit, knowledgeBaseId);
+        log.info("[traceId={}] 阶段=召回 耗时={}ms 候选数={} knowledgeBaseId={}", traceId, System.currentTimeMillis() - t1, candidates.size(), knowledgeBaseId);
 
         if (candidates.isEmpty()) {
             log.info("[traceId={}] 阶段=检索 耗时={}ms 结果=无候选", traceId, System.currentTimeMillis() - start);

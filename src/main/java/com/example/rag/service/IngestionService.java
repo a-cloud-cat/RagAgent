@@ -50,7 +50,11 @@ public class IngestionService {
      * @return 文档 ID
      */
     public Long ingest(String filename, String text) {
-        Long documentId = documentRepository.insert(filename, "PENDING");
+        return ingest(filename, text, null);
+    }
+
+    public Long ingest(String filename, String text, Long knowledgeBaseId) {
+        Long documentId = documentRepository.insert(filename, "PENDING", knowledgeBaseId);
         try {
             List<String> chunkTexts = textChunker.split(text);
             if (chunkTexts.isEmpty()) {

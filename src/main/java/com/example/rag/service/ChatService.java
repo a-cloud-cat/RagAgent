@@ -82,7 +82,7 @@ public class ChatService {
 
     public void streamChat(String question, SseEmitter emitter, boolean skipRetrieval,
                            List<Map<String, String>> history, String summary, String traceId,
-                           boolean enableRecommend) {
+                           boolean enableRecommend, Long knowledgeBaseId) {
         long start = System.currentTimeMillis();
         List<Chunk> retrieved = List.of();
         RetrievalOutcome outcome = null;
@@ -103,7 +103,7 @@ public class ChatService {
         } else {
             try {
                 // 检索链路：向量化 → 候选召回 → Rerank → 截 topK → 证据闸门
-                outcome = retrievalService.retrieve(queryForRetrieval, traceId);
+                outcome = retrievalService.retrieve(queryForRetrieval, traceId, knowledgeBaseId);
             } catch (Exception e) {
                 // 请求中途才暴露的故障（DB 断开、embedding 失败）：通知前端后降级为裸 LLM
                 log.error("[traceId={}] 检索链路失败，降级为普通对话", traceId, e);

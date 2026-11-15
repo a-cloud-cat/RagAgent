@@ -30,19 +30,26 @@ public class DocumentRepository {
      * 新建文档并返回自增主键。
      */
     public Long insert(String name, String status) {
+        return insert(name, status, null);
+    }
+
+    public Long insert(String name, String status, Long knowledgeBaseId) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
 
         jdbcTemplate.update(connection -> {
-            // 显式只返回 id 列：PostgreSQL 驱动在 RETURN_GENERATED_KEYS 时会回传整行，
-            // 导致 KeyHolder 含多个键，这里指定列名保证只取主键
             PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO t_document (name, status, create_time, update_time) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO t_document (name, status, knowledge_base_id, create_time, update_time) VALUES (?, ?, ?, ?, ?)",
                     new String[]{"id"});
             Timestamp now = Timestamp.valueOf(LocalDateTime.now());
             ps.setString(1, name);
             ps.setString(2, status);
-            ps.setTimestamp(3, now);
+            if (knowledgeBaseId != null) {
+                ps.setLong(3, knowledgeBaseId);
+            } else {
+                ps.setObject(3, null);
+            }
             ps.setTimestamp(4, now);
+            ps.setTimestamp(5, now);
             return ps;
         }, keyHolder);
         return keyHolder.getKeyAs(Long.class);
@@ -60,7 +67,7 @@ public class DocumentRepository {
     /** 列出所有未删除文档，按创建时间倒序；分块数用子查询带出，避免逐文档再查一次。 */
     public List<Document> listAll() {
         return jdbcTemplate.query(
-                "SELECT d.id, d.name, d.status, d.create_time, "
+                "SELECT d.id, d.name, d.status, d.create_time, d.knowledge_base_id, "
                         + "(SELECT COUNT(*) FROM t_chunk c "
                         + "WHERE c.document_id = d.id AND c.deleted = 0) AS chunk_count "
                         + "FROM t_document d WHERE d.deleted = 0 ORDER BY d.create_time DESC",
@@ -77,7 +84,7 @@ public class DocumentRepository {
     /** 回收站：列出所有已删除文档，分块数统计已删除分块。 */
     public List<Document> listDeleted() {
         return jdbcTemplate.query(
-                "SELECT d.id, d.name, d.status, d.create_time, "
+                "SELECT d.id, d.name, d.status, d.create_time, d.knowledge_base_id, "
                         + "(SELECT COUNT(*) FROM t_chunk c "
                         + "WHERE c.document_id = d.id AND c.deleted = 1) AS chunk_count "
                         + "FROM t_document d WHERE d.deleted = 1 ORDER BY d.update_time DESC",
@@ -98,6 +105,8 @@ public class DocumentRepository {
         doc.setStatus(rs.getString("status"));
         doc.setCreateTime(rs.getTimestamp("create_time").toLocalDateTime());
         doc.setChunkCount(rs.getInt("chunk_count"));
+        long kbId = rs.getLong("knowledge_base_id");
+        doc.setKnowledgeBaseId(rs.wasNull() ? null : kbId);
         return doc;
     }
 }

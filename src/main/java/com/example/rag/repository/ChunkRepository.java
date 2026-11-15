@@ -42,24 +42,38 @@ public class ChunkRepository {
     /**
      * 按余弦距离检索最相似的 topK 个分块。
      *
-     * @param queryEmbedding 查询向量
-     * @param topK           返回条数
+     * @param queryEmbedding    查询向量
+     * @param topK              返回条数
+     * @param knowledgeBaseId   可空；指定知识库时只搜该库下的文档，null 表示全库
      */
-    public List<Chunk> search(float[] queryEmbedding, int topK) {
+    public List<Chunk> search(float[] queryEmbedding, int topK, Long knowledgeBaseId) {
         PGobject vector = toPgVector(queryEmbedding);
 
-        return jdbcTemplate.query(
-                "SELECT c.id, c.document_id, d.name AS document_name, c.chunk_index, c.content, "
-                        + "1 - (c.embedding <=> ?) AS score "
-                        + "FROM t_chunk c JOIN t_document d ON c.document_id = d.id "
-                        + "WHERE c.deleted = 0 AND d.deleted = 0 AND c.embedding IS NOT NULL "
-                        + "ORDER BY c.embedding <=> ? LIMIT ?",
-                ps -> {
-                    ps.setObject(1, vector);
-                    ps.setObject(2, vector);
-                    ps.setInt(3, topK);
-                },
-                this::mapRow);
+        String sql = "SELECT c.id, c.document_id, d.name AS document_name, c.chunk_index, c.content, "
+                + "1 - (c.embedding <=> ?) AS score "
+                + "FROM t_chunk c JOIN t_document d ON c.document_id = d.id "
+                + "WHERE c.deleted = 0 AND d.deleted = 0 AND c.embedding IS NOT NULL ";
+        if (knowledgeBaseId != null) {
+            sql += "AND d.knowledge_base_id = ? ";
+        }
+        sql += "ORDER BY c.embedding <=> ? LIMIT ?";
+
+        return jdbcTemplate.query(sql, ps -> {
+            ps.setObject(1, vector);
+            if (knowledgeBaseId != null) {
+                ps.setLong(2, knowledgeBaseId);
+                ps.setObject(3, vector);
+                ps.setInt(4, topK);
+            } else {
+                ps.setObject(2, vector);
+                ps.setInt(3, topK);
+            }
+        }, this::mapRow);
+    }
+
+    /** 全库检索（不区分知识库），保持原有调用不变。 */
+    public List<Chunk> search(float[] queryEmbedding, int topK) {
+        return search(queryEmbedding, topK, null);
     }
 
     private Chunk mapRow(ResultSet rs, int rowNum) throws SQLException {

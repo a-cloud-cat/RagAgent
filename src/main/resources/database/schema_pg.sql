@@ -33,7 +33,19 @@ CREATE INDEX IF NOT EXISTS idx_chunk_embedding_hnsw ON t_chunk USING hnsw (embed
 COMMENT ON TABLE t_chunk IS '文档分块与向量表';
 COMMENT ON COLUMN t_chunk.embedding IS '文本向量（text-embedding-v4，1536 维）';
 
--- 4) 对话反馈表
+-- 4) 知识库表（文档分类归属，检索时可选过滤）
+CREATE TABLE IF NOT EXISTS t_knowledge_base (
+    id          BIGSERIAL PRIMARY KEY,
+    name        VARCHAR(64)  NOT NULL UNIQUE,
+    description VARCHAR(255),
+    create_time TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE t_knowledge_base IS '知识库分类表';
+
+-- 文档归属到知识库（可空，null 表示全库可见）
+ALTER TABLE t_document ADD COLUMN IF NOT EXISTS knowledge_base_id BIGINT REFERENCES t_knowledge_base(id);
+
+-- 5) 对话反馈表
 CREATE TABLE IF NOT EXISTS t_feedback (
     id          BIGSERIAL PRIMARY KEY,
     question    TEXT        NOT NULL,

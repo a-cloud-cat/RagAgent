@@ -45,7 +45,7 @@ class RetrievalServiceTest {
                 rerankClient, retrievalProperties, rerankProperties);
 
         when(embeddingClient.embed(anyList())).thenReturn(List.of(new float[]{0.1f, 0.2f}));
-        when(chunkRepository.search(any(float[].class), anyInt()))
+        when(chunkRepository.search(any(float[].class), anyInt(), any()))
                 .thenReturn(List.of(chunk("d1", 0, 0.9), chunk("d2", 1, 0.5), chunk("d3", 2, 0.3)));
     }
 
@@ -68,7 +68,7 @@ class RetrievalServiceTest {
         rerankProperties.setEnabled(false);
         stubRerank(0.1);
 
-        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace", null);
 
         assertTrue(outcome.isEvidenceReady());
         assertEquals(3, outcome.getChunks().size());
@@ -79,7 +79,7 @@ class RetrievalServiceTest {
         rerankProperties.setEnabled(true);
         stubRerank(0.9);
 
-        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace", null);
 
         assertTrue(outcome.isEvidenceReady());
         assertEquals(0.9, outcome.getTop1Score(), 1e-9);
@@ -90,7 +90,7 @@ class RetrievalServiceTest {
         rerankProperties.setEnabled(true);
         stubRerank(0.2);
 
-        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace", null);
 
         assertFalse(outcome.isEvidenceReady());
         // 拦截不丢召回块，闸门只是标记，拒答由上层决定
@@ -102,7 +102,7 @@ class RetrievalServiceTest {
         rerankProperties.setEnabled(true);
         stubRerank(retrievalProperties.getEvidenceThreshold());
 
-        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace", null);
 
         assertTrue(outcome.isEvidenceReady());
     }
@@ -113,7 +113,7 @@ class RetrievalServiceTest {
         when(rerankClient.rerank(any(), anyList(), anyInt()))
                 .thenThrow(new IllegalStateException("rerank 挂了"));
 
-        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace", null);
 
         assertTrue(outcome.isEvidenceReady());
         assertEquals(3, outcome.getChunks().size());
@@ -121,9 +121,9 @@ class RetrievalServiceTest {
 
     @Test
     void 无候选时按无证据处理() {
-        when(chunkRepository.search(any(float[].class), anyInt())).thenReturn(List.of());
+        when(chunkRepository.search(any(float[].class), anyInt(), any())).thenReturn(List.of());
 
-        RetrievalOutcome outcome = service.retrieve("问题", "test-trace");
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace", null);
 
         assertTrue(outcome.getChunks().isEmpty());
         assertFalse(outcome.isEvidenceReady());

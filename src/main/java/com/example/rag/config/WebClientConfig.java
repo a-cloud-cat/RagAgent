@@ -14,7 +14,8 @@ public class WebClientConfig {
 
     @Bean
     public WebClient webClient(WebClient.Builder builder) {
-        return builder.build();
+        // embedding 批量返回多个 1536 维向量，默认 256KB 缓冲不够
+        return builder.codecs(c -> c.defaultCodecs().maxInMemorySize(2 * 1024 * 1024)).build();
     }
 
     @Bean

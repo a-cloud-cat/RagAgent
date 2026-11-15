@@ -18,6 +18,9 @@ public class ChatRequest {
     // 是否开启回答后的追问推荐，前端设置面板控制，默认开启
     private boolean enableRecommend = true;
 
+    // 可空，指定检索哪个知识库，null 表示全库
+    private Long knowledgeBaseId;
+
     public String getQuestion() {
         return question;
     }
@@ -56,5 +59,13 @@ public class ChatRequest {
 
     public void setEnableRecommend(boolean enableRecommend) {
         this.enableRecommend = enableRecommend;
+    }
+
+    public Long getKnowledgeBaseId() {
+        return knowledgeBaseId;
+    }
+
+    public void setKnowledgeBaseId(Long knowledgeBaseId) {
+        this.knowledgeBaseId = knowledgeBaseId;
     }
 }

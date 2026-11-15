@@ -26,7 +26,7 @@ import com.example.rag.service.IngestionService;
 @RequestMapping("/documents")
 public class DocumentController {
 
-    private static final Set<String> SUPPORTED_EXTENSIONS = Set.of(".txt", ".pdf", ".html", ".htm");
+    private static final Set<String> SUPPORTED_EXTENSIONS = Set.of(".txt", ".pdf", ".html", ".htm", ".md");
 
     private final IngestionService ingestionService;
 
@@ -65,7 +65,8 @@ public class DocumentController {
      * 上传并入库：multipart/form-data；前端表单里，文件参数名必须是 `file`
      */
     @PostMapping
-    public Map<String, Object> upload(@RequestParam("file") MultipartFile file) throws IOException {
+    public Map<String, Object> upload(@RequestParam("file") MultipartFile file,
+                                      @RequestParam(value = "knowledgeBaseId", required = false) Long knowledgeBaseId) throws IOException {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("上传文件为空");
         }
@@ -75,14 +76,14 @@ public class DocumentController {
         }
         String lowerName = filename.toLowerCase();
         if (SUPPORTED_EXTENSIONS.stream().noneMatch(lowerName::endsWith)) {
-            throw new IllegalArgumentException("仅支持 .txt/.pdf/.html/.htm 文件");
+            throw new IllegalArgumentException("仅支持 .txt/.pdf/.html/.htm/.md 文件");
         }
 
-        // txt 本身就是纯文本，按 UTF-8 直读；PDF/HTML 交给 Tika 提取正文
-        String text = lowerName.endsWith(".txt")
+        // txt/md 本身就是纯文本，按 UTF-8 直读；PDF/HTML 交给 Tika 提取正文
+        String text = (lowerName.endsWith(".txt") || lowerName.endsWith(".md"))
                 ? new String(file.getBytes(), StandardCharsets.UTF_8)
                 : documentParser.parse(file.getInputStream());
-        Long documentId = ingestionService.ingest(filename, text);
+        Long documentId = ingestionService.ingest(filename, text, knowledgeBaseId);
 
         return Map.of("id", documentId, "name", filename, "status", "INGESTED");
     }

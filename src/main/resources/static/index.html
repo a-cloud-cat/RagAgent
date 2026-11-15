@@ -310,6 +310,10 @@
         <input type="checkbox" id="recommend-toggle" checked>
         <span>开启追问推荐</span>
     </label>
+    <label class="setting-row">
+        <span>知识库：</span>
+        <select id="kb-select"></select>
+    </label>
 </div>
 <div id="messages">
     <div class="hint">在下方输入问题开始对话（接口 POST /chat，SSE 流式返回）</div>
@@ -403,6 +407,24 @@
     });
     recommendToggle.addEventListener('change', () => {
         localStorage.setItem('recommend-enabled', recommendToggle.checked);
+    });
+
+    // 知识库下拉框：加载列表，选值存 localStorage
+    const kbSelect = document.getElementById('kb-select');
+    fetch('/api/knowledge-bases').then(r => r.json()).then(data => {
+        const opt = document.createElement('option');
+        opt.value = ''; opt.textContent = '全库';
+        kbSelect.appendChild(opt);
+        (data.data || []).forEach(kb => {
+            const o = document.createElement('option');
+            o.value = kb.id; o.textContent = kb.name;
+            kbSelect.appendChild(o);
+        });
+        const saved = localStorage.getItem('kb-id');
+        if (saved) kbSelect.value = saved;
+    }).catch(() => {});
+    kbSelect.addEventListener('change', () => {
+        localStorage.setItem('kb-id', kbSelect.value);
     });
     document.addEventListener('click', (e) => {
         if (!settingsPanel.contains(e.target) && e.target !== settingsBtn) {
@@ -773,7 +795,7 @@
             const resp = await fetch('/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question, skipRetrieval, history, summary, enableRecommend: recommendToggle.checked }),
+                body: JSON.stringify({ question, skipRetrieval, history, summary, enableRecommend: recommendToggle.checked, knowledgeBaseId: kbSelect.value ? Number(kbSelect.value) : null }),
                 signal: abortController.signal
             });
             if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);

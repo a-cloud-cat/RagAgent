@@ -27,6 +27,7 @@ rag:
     top-k: 3              # 最终送入 LLM 的分块条数
     candidate-limit: 20   # 送 Rerank 精排的候选池大小（必须 ≥ top-k）
     evidence-threshold: 0.48  # 证据闸门：rerank top1 相关性低于此值按无证据拒答（标定：11 正例最低 0.680、4 负例最高 0.276 的中点）
+    bm25-enabled: true    # BM25 关键词召回开关（已验证修复，向量+BM25 融合）
   rerank:
     enabled: true         # 关闭时 NoopRerankClient 原样透传；开启时调百炼 qwen3-rerank
     model: qwen3-rerank

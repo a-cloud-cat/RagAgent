@@ -1,6 +1,9 @@
 package com.example.rag.service;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +31,8 @@ public class RetrievalService {
 
     private final RerankClient rerankClient;
 
+    private final Bm25Scorer bm25Scorer;
+
     private final RetrievalProperties retrievalProperties;
 
     private final RerankProperties rerankProperties;
@@ -35,18 +40,20 @@ public class RetrievalService {
     public RetrievalService(EmbeddingClient embeddingClient,
                             ChunkRepository chunkRepository,
                             RerankClient rerankClient,
+                            Bm25Scorer bm25Scorer,
                             RetrievalProperties retrievalProperties,
                             RerankProperties rerankProperties) {
         this.embeddingClient = embeddingClient;
         this.chunkRepository = chunkRepository;
         this.rerankClient = rerankClient;
+        this.bm25Scorer = bm25Scorer;
         this.retrievalProperties = retrievalProperties;
         this.rerankProperties = rerankProperties;
     }
 
     /**
-     * 完整检索链路：向量化 → 候选召回 → Rerank → 截 top-k → 证据闸门。
-     * Rerank 异常时降级为向量原始顺序前 top-k，并放行（故障期沿用带资料回答）。
+     * 完整检索链路：向量化 → 向量召回 + BM25 关键词召回 → 合并去重 → Rerank → 截 top-k → 证据闸门。
+     * Rerank 异常时降级为合并后原始顺序前 top-k，并放行（故障期沿用带资料回答）。
      * traceId 仅用于把各阶段耗时日志串到同一次问答。
      */
     public RetrievalOutcome retrieve(String query, String traceId, Long knowledgeBaseId) {
@@ -59,17 +66,28 @@ public class RetrievalService {
         float[] queryVector = embeddingClient.embed(List.of(query)).get(0);
         log.info("[traceId={}] 阶段=向量化 耗时={}ms", traceId, System.currentTimeMillis() - t0);
 
-        // 2. 候选召回（取 candidateLimit 条，可选知识库过滤）
+        // 2. 向量召回（取 candidateLimit 条，可选知识库过滤）
         long t1 = System.currentTimeMillis();
-        List<Chunk> candidates = chunkRepository.search(queryVector, candidateLimit, knowledgeBaseId);
-        log.info("[traceId={}] 阶段=召回 耗时={}ms 候选数={} knowledgeBaseId={}", traceId, System.currentTimeMillis() - t1, candidates.size(), knowledgeBaseId);
+        List<Chunk> vectorCandidates = chunkRepository.search(queryVector, candidateLimit, knowledgeBaseId);
+        log.info("[traceId={}] 阶段=向量召回 耗时={}ms 候选数={} knowledgeBaseId={}", traceId, System.currentTimeMillis() - t1, vectorCandidates.size(), knowledgeBaseId);
+
+        // 3. BM25 关键词召回（可选，与向量召回互补）
+        List<Chunk> bm25Candidates = List.of();
+        if (retrievalProperties.isBm25Enabled()) {
+            long t1b = System.currentTimeMillis();
+            bm25Candidates = bm25Retrieve(query, knowledgeBaseId);
+            log.info("[traceId={}] 阶段=BM25召回 耗时={}ms 候选数={}", traceId, System.currentTimeMillis() - t1b, bm25Candidates.size());
+        }
+
+        // 4. 合并两路召回结果（按 chunk id 去重，保留向量召回的顺序在前）
+        List<Chunk> candidates = mergeCandidates(vectorCandidates, bm25Candidates);
 
         if (candidates.isEmpty()) {
             log.info("[traceId={}] 阶段=检索 耗时={}ms 结果=无候选", traceId, System.currentTimeMillis() - start);
             return new RetrievalOutcome(candidates, 0, false);
         }
 
-        // 3. Rerank 精排取 top-k（异常降级为向量原始顺序，降级时不卡闸门）
+        // 5. Rerank 精排取 top-k（异常降级为合并后原始顺序，降级时不卡闸门）
         List<Chunk> retrieved;
         try {
             long t2 = System.currentTimeMillis();
@@ -109,6 +127,52 @@ public class RetrievalService {
         }
         log.info("[traceId={}] 阶段=检索 耗时={}ms", traceId, System.currentTimeMillis() - start);
         return new RetrievalOutcome(retrieved, top1Score, ready);
+    }
+
+    /**
+     * BM25 关键词召回：提取关键词 → ILIKE 召回候选 → 拉语料统计与词频 → BM25 打分排序。
+     * 任一步骤异常时返回空列表，不影响向量召回主链路。
+     */
+    private List<Chunk> bm25Retrieve(String query, Long knowledgeBaseId) {
+        try {
+            List<String> keywords = KeywordExtractor.extract(query);
+            if (keywords.isEmpty()) {
+                return List.of();
+            }
+
+            int limit = retrievalProperties.getBm25CandidateLimit();
+            List<Chunk> candidates = chunkRepository.searchByKeywords(keywords, limit, knowledgeBaseId);
+            if (candidates.isEmpty()) {
+                return List.of();
+            }
+
+            CorpusStats stats = chunkRepository.getCorpusStats(knowledgeBaseId);
+            if (stats.totalDocs() == 0) {
+                return List.of();
+            }
+
+            Map<String, Long> termDocCounts = chunkRepository.countTermDocFreq(keywords, knowledgeBaseId);
+            return bm25Scorer.score(candidates, keywords, stats, termDocCounts);
+        } catch (Exception e) {
+            // BM25 是补充链路，失败不影响向量召回主流程
+            log.error("[BM25] 关键词召回失败，跳过", e);
+            return List.of();
+        }
+    }
+
+    /**
+     * 合并向量召回与 BM25 召回结果，按 chunk id 去重。
+     * 向量召回结果排在前面（保留语义相关性优先级），BM25 独有结果追加在后。
+     */
+    private List<Chunk> mergeCandidates(List<Chunk> vectorCandidates, List<Chunk> bm25Candidates) {
+        Map<Long, Chunk> merged = new LinkedHashMap<>();
+        for (Chunk chunk : vectorCandidates) {
+            merged.put(chunk.getId(), chunk);
+        }
+        for (Chunk chunk : bm25Candidates) {
+            merged.putIfAbsent(chunk.getId(), chunk);
+        }
+        return new ArrayList<>(merged.values());
     }
 
     private double scoreOf(List<Chunk> chunks) {

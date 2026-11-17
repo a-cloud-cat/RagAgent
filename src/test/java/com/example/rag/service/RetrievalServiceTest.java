@@ -28,6 +28,8 @@ class RetrievalServiceTest {
 
     private RerankClient rerankClient;
 
+    private Bm25Scorer bm25Scorer;
+
     private RetrievalProperties retrievalProperties;
 
     private RerankProperties rerankProperties;
@@ -39,10 +41,13 @@ class RetrievalServiceTest {
         embeddingClient = mock(EmbeddingClient.class);
         chunkRepository = mock(ChunkRepository.class);
         rerankClient = mock(RerankClient.class);
+        bm25Scorer = mock(Bm25Scorer.class);
         retrievalProperties = new RetrievalProperties();
+        // 既有测试聚焦向量召回与闸门逻辑，关闭 BM25 避免额外 mock
+        retrievalProperties.setBm25Enabled(false);
         rerankProperties = new RerankProperties();
         service = new RetrievalService(embeddingClient, chunkRepository,
-                rerankClient, retrievalProperties, rerankProperties);
+                rerankClient, bm25Scorer, retrievalProperties, rerankProperties);
 
         when(embeddingClient.embed(anyList())).thenReturn(List.of(new float[]{0.1f, 0.2f}));
         when(chunkRepository.search(any(float[].class), anyInt(), any()))
@@ -51,6 +56,7 @@ class RetrievalServiceTest {
 
     private Chunk chunk(String document, int index, double score) {
         Chunk c = new Chunk();
+        c.setId((long) index + 1);
         c.setDocumentName(document);
         c.setChunkIndex(index);
         c.setContent("内容 " + index);

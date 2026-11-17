@@ -50,6 +50,14 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
                 .header("Content-Type", "application/json")
                 .bodyValue(request)
                 .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
+                        resp -> resp.bodyToMono(String.class)
+                                .defaultIfEmpty("(空响应体)")
+                                .flatMap(body -> {
+                                    log.error("embedding 接口异常：HTTP {}，响应体：{}", resp.statusCode(), body);
+                                    return reactor.core.publisher.Mono.error(
+                                            new IllegalStateException("embedding 接口返回 " + resp.statusCode() + "：" + body));
+                                }))
                 .bodyToMono(EmbeddingResponse.class)
                 .block();
 

@@ -23,8 +23,8 @@ public class IngestionService {
 
     private static final Logger log = LoggerFactory.getLogger(IngestionService.class);
 
-    /** 单次向量化请求的最大文本条数（百炼接口有批量上限，16 是保守值） */
-    private static final int EMBED_BATCH_SIZE = 16;
+    /** 单次向量化请求的最大文本条数（百炼 text-embedding-v4 批量上限为 10） */
+    private static final int EMBED_BATCH_SIZE = 10;
 
     private final DocumentRepository documentRepository;
 

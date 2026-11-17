@@ -1,90 +1,366 @@
 [
   {
-    "question": "Spring Boot 最核心的设计理念是什么？",
-    "document": "spring-boot-notes.html",
-    "expectedPhrase": "约定优于配置",
+    "question": "RagAgent 用的 Embedding 模型叫什么名字？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "text-embedding-v4",
+    "type": "精确术语"
+  },
+  {
+    "question": "RagAgent 的 Embedding 向量是多少维的？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "1536",
+    "type": "精确术语"
+  },
+  {
+    "question": "RagAgent 用哪个数据库做向量存储？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "PostgreSQL + pgvector",
+    "type": "精确术语"
+  },
+  {
+    "question": "RagAgent 的 Rerank 精排模型是什么？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "gte-rerank",
+    "type": "精确术语"
+  },
+  {
+    "question": "RagAgent 用哪家的大模型做对话生成？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "DeepSeek Chat",
+    "type": "精确术语"
+  },
+  {
+    "question": "RagAgent 会话记忆的滑动窗口保留最近几轮对话？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "10",
+    "type": "精确术语"
+  },
+  {
+    "question": "对话超过多少轮会触发摘要压缩？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "8",
+    "type": "精确术语"
+  },
+  {
+    "question": "RagAgent 证据闸门的拒答阈值是多少？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "0.48",
+    "type": "精确术语"
+  },
+  {
+    "question": "向量召回阶段会取多少条候选？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "20",
+    "type": "精确术语"
+  },
+  {
+    "question": "Rerank 精排之后取前几条送给大模型？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "3",
+    "type": "精确术语"
+  },
+  {
+    "question": "评测中关掉 Rerank 时正例的 hitRate 是多少？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "0.545",
+    "type": "精确术语"
+  },
+  {
+    "question": "评测中开启 Rerank 时正例的 MRR 是多少？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "0.848",
+    "type": "精确术语"
+  },
+  {
+    "question": "评测中开启 Rerank 时正例的 hitRate 是多少？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "1.000",
+    "type": "精确术语"
+  },
+  {
+    "question": "评测里精确术语类型题目的 MRR 是多少？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "0.722",
+    "type": "精确术语"
+  },
+  {
+    "question": "BaiLianRerankClient 在什么条件下会短路不调 rerank API？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "candidates.size() <= topN",
+    "type": "精确术语"
+  },
+  {
+    "question": "EvalService.findHitRank 方法有什么已知性能问题？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "O(n²)",
+    "type": "精确术语"
+  },
+  {
+    "question": "DeepSeek API 的 QPS 限流是多少？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "3 QPS",
+    "type": "精确术语"
+  },
+  {
+    "question": "DeepSeek API 每分钟的 token 限流是多少？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "100K tokens/min",
+    "type": "精确术语"
+  },
+  {
+    "question": "部署 pgvector 的 Docker 容器名叫什么？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "pgvector",
+    "type": "精确术语"
+  },
+  {
+    "question": "证据闸门阈值标定的时候，正例的最低分是多少？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "0.680",
+    "type": "精确术语"
+  },
+  {
+    "question": "证据闸门阈值标定的时候，负例的最高分是多少？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "0.276",
+    "type": "精确术语"
+  },
+  {
+    "question": "text-embedding-v4 如果不显式传 dimension，默认是多少维？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "1024",
+    "type": "精确术语"
+  },
+  {
+    "question": "pgvector 用什么操作符计算余弦距离？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "<=>",
+    "type": "精确术语"
+  },
+  {
+    "question": "向量字段在 PostgreSQL 里的类型声明是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "vector(1536)",
+    "type": "精确术语"
+  },
+  {
+    "question": "pgvector 开启扩展的 SQL 语句是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "CREATE EXTENSION IF NOT EXISTS vector",
+    "type": "精确术语"
+  },
+  {
+    "question": "HNSW 索引创建时用的操作符类是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "vector_cosine_ops",
+    "type": "精确术语"
+  },
+  {
+    "question": "百炼 Embedding API 的请求域名是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "dashscope.aliyuncs.com",
+    "type": "精确术语"
+  },
+  {
+    "question": "百炼 Rerank API 用的模型名是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "gte-rerank",
+    "type": "精确术语"
+  },
+  {
+    "question": "Rerank API 请求里 top_n 参数设为多少？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "3",
+    "type": "精确术语"
+  },
+  {
+    "question": "DeepSeek Chat API 用的模型名是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "deepseek-chat",
+    "type": "精确术语"
+  },
+  {
+    "question": "DeepSeek Chat 的 temperature 参数设为多少？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "0.3",
+    "type": "精确术语"
+  },
+  {
+    "question": "DeepSeek 每天的 token 限流是多少？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "2M tokens/day",
+    "type": "精确术语"
+  },
+  {
+    "question": "配置里控制最终送 LLM 分块条数的键名是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "top-k",
+    "type": "精确术语"
+  },
+  {
+    "question": "配置里控制 Rerank 候选池大小的键名是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "candidate-limit",
+    "type": "精确术语"
+  },
+  {
+    "question": "配置里控制证据闸门阈值的键名是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "evidence-threshold",
+    "type": "精确术语"
+  },
+  {
+    "question": "配置里控制 Rerank 开关的键名是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "enabled",
+    "type": "精确术语"
+  },
+  {
+    "question": "会话记忆中保留最近几轮的原文不做摘要？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "4",
+    "type": "精确术语"
+  },
+  {
+    "question": "对话摘要最多限制多少个字符？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "200",
+    "type": "精确术语"
+  },
+  {
+    "question": "PostgreSQL 容器启动时设置的密码是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "123456",
+    "type": "精确术语"
+  },
+  {
+    "question": "PostgreSQL 容器映射到宿主机的端口是多少？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "5432",
+    "type": "精确术语"
+  },
+  {
+    "question": "pgvector 镜像用的是哪个 PostgreSQL 大版本？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "pg16",
+    "type": "精确术语"
+  },
+  {
+    "question": "Maven 离线编译需要加什么参数？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "-o",
+    "type": "精确术语"
+  },
+  {
+    "question": "Embedding API 请求体 parameters 里 encode_type 的值是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "float",
+    "type": "精确术语"
+  },
+  {
+    "question": "RagAgent 的整体技术栈由哪些组件组成？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "Spring Boot + PostgreSQL/pgvector",
     "type": "语义改写"
   },
   {
-    "question": "对象不自己 new 依赖、交给容器管理，这种思想叫什么？",
-    "document": "spring-boot-notes.html",
-    "expectedPhrase": "控制反转",
+    "question": "从用户提问到 LLM 回答，检索链路依次经过哪几个阶段？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "问题改写",
     "type": "语义改写"
   },
   {
-    "question": "数据访问层组件应该标注哪个构造型注解？",
-    "document": "spring-boot-notes.html",
-    "expectedPhrase": "@Repository",
-    "type": "精确术语"
+    "question": "什么情况下证据闸门会不管分数直接放行？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "Rerank 关闭或异常",
+    "type": "语义改写"
   },
   {
-    "question": "RagAgent 配置检索条数的配置键叫什么？",
-    "document": "spring-boot-notes.html",
-    "expectedPhrase": "rag.retrieval.top-k",
-    "type": "精确术语"
+    "question": "RagAgent 的会话记忆是有状态还是无状态的？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "无状态架构",
+    "type": "语义改写"
   },
   {
-    "question": "RagAgent 文档解析功能的验收暗号是什么？",
-    "document": "spring-boot-notes.html",
-    "expectedPhrase": "青柠七三九二",
-    "type": "精确术语"
+    "question": "为什么调用 embedding 接口时必须显式指定 dimension 参数？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "向量维度不符",
+    "type": "语义改写"
   },
   {
-    "question": "spring-boot-starter-web 默认引入哪个内嵌 Web 容器？",
-    "document": "spring-boot-notes.html",
-    "expectedPhrase": "Tomcat",
-    "type": "精确术语"
+    "question": "如果不想用云端 DeepSeek，可以本地用什么工具替代？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "LM Studio",
+    "type": "语义改写"
   },
   {
-    "question": "RagAgent 用什么 HTTP 客户端流式调用大模型？",
-    "document": "spring-boot-notes.html",
-    "expectedPhrase": "WebClient",
-    "type": "精确术语"
+    "question": "向量检索用的是什么索引结构？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "HNSW",
+    "type": "语义改写"
   },
   {
-    "question": "Spring Boot 自动配置类的清单文件名是什么？",
-    "document": "spring-boot-notes.html",
-    "expectedPhrase": "AutoConfiguration.imports",
-    "type": "精确术语"
+    "question": "当前项目里 BM25 关键词检索融合的实现状态是什么？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "暂未实现",
+    "type": "语义改写"
   },
   {
-    "question": "Spring 的控制反转 IoC 具体指什么？对象的依赖由谁创建和管理？",
-    "document": "spring-boot-notes.html",
-    "expectedPhrase": "IoC（Inversion of Control，控制反转）：对象不再自己 new 依赖，而是由 Spring 容器在启动时创建并管理 Bean",
+    "question": "数据库里一个分块都没有的时候检索会怎样？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "evidence 恒为 false",
+    "type": "语义改写"
+  },
+  {
+    "question": "Rerank 在整个检索流程里起什么作用？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "精排",
+    "type": "语义改写"
+  },
+  {
+    "question": "DeepSeek Chat API 怎么开启流式返回？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "stream",
+    "type": "语义改写"
+  },
+  {
+    "question": "RagAgent 所有配置项的统一前缀是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "rag",
+    "type": "语义改写"
+  },
+  {
+    "question": "证据闸门的阈值 0.48 是怎么定出来的？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "0.680",
     "type": "跨块"
   },
   {
-    "question": "RagAgent 中 TikaDocumentParser 和 IngestionService 分别用什么注解标注、属于哪一层？",
-    "document": "spring-boot-notes.html",
-    "expectedPhrase": "TikaDocumentParser 这种可替换能力； @Service：业务编排层，例如 IngestionService 负责",
+    "question": "RagAgent 完整的检索链路从 query 到送 LLM 中间有哪些环节？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "向量召回",
     "type": "跨块"
   },
   {
-    "question": "Spring Boot 启动时从哪个完整路径读取自动配置类清单？",
-    "document": "spring-boot-notes.html",
-    "expectedPhrase": "Spring Boot 启动时读取各 jar 包中 META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports",
+    "question": "会话记忆的完整策略包含哪两部分？",
+    "document": "rag-project-architecture.md",
+    "expectedPhrase": "滑动窗口",
+    "type": "跨块"
+  },
+  {
+    "question": "百炼 Embedding 接口的调用地址和必须传的关键参数分别是什么？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "dimension",
+    "type": "跨块"
+  },
+  {
+    "question": "RagAgent 检索相关的配置项一共有哪几个？",
+    "document": "tech-config-notes.md",
+    "expectedPhrase": "top-k",
     "type": "跨块"
   },
   {
     "question": "今天北京的天气怎么样？",
-    "document": "",
-    "expectedPhrase": "",
-    "type": "知识库外"
-  },
-  {
-    "question": "如何制作红烧肉？",
-    "document": "",
-    "expectedPhrase": "",
-    "type": "知识库外"
-  },
-  {
-    "question": "李白的代表作有哪些？",
-    "document": "",
-    "expectedPhrase": "",
-    "type": "知识库外"
-  },
-  {
-    "question": "水的沸点是多少摄氏度？",
     "document": "",
     "expectedPhrase": "",
     "type": "知识库外"

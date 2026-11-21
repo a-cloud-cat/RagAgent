@@ -135,4 +135,26 @@ class RetrievalServiceTest {
         assertFalse(outcome.isEvidenceReady());
         assertEquals(0, outcome.getTop1Score(), 1e-9);
     }
+
+    /** 候选等于 topK 时 rerank 正常覆盖 score，闸门放行 */
+    @Test
+    void 候选等于topK时rerank正常覆盖score闸门放行() {
+        retrievalProperties.setCandidateLimit(3);
+        retrievalProperties.setTopK(3);
+        rerankProperties.setEnabled(true);
+
+        Chunk c0 = chunk("d1", 0, 0.032);
+        Chunk c1 = chunk("d2", 1, 0.028);
+        Chunk c2 = chunk("d3", 2, 0.025);
+        when(chunkRepository.search(any(float[].class), anyInt(), any()))
+                .thenReturn(List.of(c0, c1, c2));
+
+        when(rerankClient.rerank(any(), anyList(), anyInt())).thenReturn(
+                List.of(chunk("d1", 0, 0.9), chunk("d2", 1, 0.4), chunk("d3", 2, 0.2)));
+
+        RetrievalOutcome outcome = service.retrieve("问题", "test-trace", null);
+
+        assertEquals(0.9, outcome.getTop1Score(), 1e-9);
+        assertTrue(outcome.isEvidenceReady());
+    }
 }

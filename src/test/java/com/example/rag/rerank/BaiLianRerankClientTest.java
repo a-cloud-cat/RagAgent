@@ -139,4 +139,39 @@ class BaiLianRerankClientTest {
         assertEquals("块二", result.get(0).getContent());
         assertEquals(0.95, result.get(0).getScore(), 0.001);
     }
+
+    /** 候选 ≤ topN 时也必须调 API 覆盖 score */
+    @Test
+    void rerank_候选不超过topN时仍调API覆盖score() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {
+                          "output": {
+                            "results": [
+                              {"index": 1, "relevance_score": 0.85},
+                              {"index": 0, "relevance_score": 0.6}
+                            ]
+                          },
+                          "usage": {"total_tokens": 10},
+                          "request_id": "test-req-short"
+                        }
+                        """));
+
+        Chunk c0 = new Chunk();
+        c0.setContent("块零");
+        c0.setScore(0.032);
+        Chunk c1 = new Chunk();
+        c1.setContent("块一");
+        c1.setScore(0.028);
+
+        List<Chunk> result = client.rerank("问题", List.of(c0, c1), 3);
+
+        assertEquals(1, server.getRequestCount());
+        assertEquals(2, result.size());
+        assertEquals("块一", result.get(0).getContent());
+        assertEquals(0.85, result.get(0).getScore(), 0.001);
+        assertEquals("块零", result.get(1).getContent());
+        assertEquals(0.6, result.get(1).getScore(), 0.001);
+    }
 }

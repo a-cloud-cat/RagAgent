@@ -33,8 +33,8 @@ public class BaiLianRerankClient implements RerankClient {
 
     @Override
     public List<Chunk> rerank(String query, List<Chunk> candidates, int topN) {
-        if (candidates.size() <= topN) {
-            return new ArrayList<>(candidates);
+        if (candidates.isEmpty()) {
+            return List.of();
         }
 
         List<String> documents = candidates.stream()

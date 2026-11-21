@@ -1,6 +1,7 @@
 package com.example.rag.service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,8 +80,8 @@ public class RetrievalService {
             log.info("[traceId={}] 阶段=BM25召回 耗时={}ms 候选数={}", traceId, System.currentTimeMillis() - t1b, bm25Candidates.size());
         }
 
-        // 4. 合并两路召回结果（按 chunk id 去重，保留向量召回的顺序在前）
-        List<Chunk> candidates = mergeCandidates(vectorCandidates, bm25Candidates);
+        // 4. RRF 排名融合两路召回（按 1/(k+rank) 累计，不碰绝对分数）
+        List<Chunk> candidates = rrfFusion(vectorCandidates, bm25Candidates);
 
         if (candidates.isEmpty()) {
             log.info("[traceId={}] 阶段=检索 耗时={}ms 结果=无候选", traceId, System.currentTimeMillis() - start);
@@ -161,18 +162,40 @@ public class RetrievalService {
     }
 
     /**
-     * 合并向量召回与 BM25 召回结果，按 chunk id 去重。
-     * 向量召回结果排在前面（保留语义相关性优先级），BM25 独有结果追加在后。
+     * RRF 排名融合：对向量召回和 BM25 召回各自的排名位置，
+     * 按 1/(k + rank) 累计分数，按融合分降序返回。
+     * 不使用绝对分数，只看排名位置——天然适配不同分数体系融合。
      */
-    private List<Chunk> mergeCandidates(List<Chunk> vectorCandidates, List<Chunk> bm25Candidates) {
-        Map<Long, Chunk> merged = new LinkedHashMap<>();
-        for (Chunk chunk : vectorCandidates) {
-            merged.put(chunk.getId(), chunk);
+    private List<Chunk> rrfFusion(List<Chunk> vectorCandidates, List<Chunk> bm25Candidates) {
+        int k = retrievalProperties.getRrfK();
+        Map<Long, Double> rrfScores = new HashMap<>();
+        Map<Long, Chunk> chunkMap = new LinkedHashMap<>();
+
+        for (int i = 0; i < vectorCandidates.size(); i++) {
+            Chunk c = vectorCandidates.get(i);
+            chunkMap.put(c.getId(), c);
+            rrfScores.merge(c.getId(), 1.0 / (k + i), Double::sum);
         }
-        for (Chunk chunk : bm25Candidates) {
-            merged.putIfAbsent(chunk.getId(), chunk);
+
+        for (int i = 0; i < bm25Candidates.size(); i++) {
+            Chunk c = bm25Candidates.get(i);
+            chunkMap.putIfAbsent(c.getId(), c);
+            rrfScores.merge(c.getId(), 1.0 / (k + i), Double::sum);
         }
-        return new ArrayList<>(merged.values());
+
+        List<Chunk> all = new ArrayList<>(chunkMap.values());
+        all.sort((a, b) -> {
+            double diff = rrfScores.get(b.getId()) - rrfScores.get(a.getId());
+            if (diff != 0) {
+                return diff > 0 ? 1 : -1;
+            }
+            return 0;
+        });
+
+        for (Chunk c : all) {
+            c.setScore(rrfScores.get(c.getId()));
+        }
+        return all;
     }
 
     private double scoreOf(List<Chunk> chunks) {

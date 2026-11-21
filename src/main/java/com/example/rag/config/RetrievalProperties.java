@@ -31,6 +31,9 @@ public class RetrievalProperties {
     /** BM25 关键词召回的候选条数 */
     private int bm25CandidateLimit = 20;
 
+    /** RRF 融合平滑常数，默认 60 */
+    private int rrfK = 60;
+
     public int getTopK() {
         return topK;
     }
@@ -85,6 +88,14 @@ public class RetrievalProperties {
 
     public void setBm25CandidateLimit(int bm25CandidateLimit) {
         this.bm25CandidateLimit = bm25CandidateLimit;
+    }
+
+    public int getRrfK() {
+        return rrfK;
+    }
+
+    public void setRrfK(int rrfK) {
+        this.rrfK = rrfK;
     }
 
     @PostConstruct

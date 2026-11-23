@@ -196,37 +196,68 @@ public class ChatService {
         AtomicBoolean firstTokenLogged = new AtomicBoolean(false);
         // 累积答案正文，生成结束后用于追问推荐
         StringBuilder answerBuf = new StringBuilder();
+        // 累积 usage，done 事件里带给前端
+        AtomicReference<Map<String, Object>> usageRef = new AtomicReference<>();
         Disposable subscription = flux.subscribe(
                 chunk -> {
                     if (firstTokenLogged.compareAndSet(false, true)) {
                         log.info("[traceId={}] 阶段=首token 耗时={}ms", traceId, System.currentTimeMillis() - genStart);
                     }
-                    // 从流式 chunk 里提取 delta.content 累积，用于后续推荐
-                    String delta = extractContent(chunk);
-                    if (delta != null) {
-                        answerBuf.append(delta);
-                    }
-                    try {
-                        emitter.send(chunk);
-                    } catch (IOException e) {
-                        log.warn("[traceId={}] SSE 发送失败，客户端可能已断开，取消上游订阅", traceId, e);
-                        // subscribe() 返回前同步源可能已触发回调，此时句柄尚未入槽
-                        Disposable current = subscriptionRef.get();
-                        if (current != null) {
-                            current.dispose();
+                    StreamDelta delta = extractStreamDelta(chunk);
+                    if (delta == null) {
+                        // [DONE] 或 usage-only chunk：透传 usage 累积，不发 content
+                        if (chunk != null && chunk.contains("\"usage\"") && !chunk.contains("\"delta\"")) {
+                            usageRef.set(parseUsage(chunk));
                         }
-                        emitter.completeWithError(e);
+                        return;
+                    }
+                    if (delta.content != null) {
+                        answerBuf.append(delta.content);
+                        try {
+                            emitter.send(SseEmitter.event()
+                                    .name("content")
+                                    .data(Map.of("content", delta.content), MediaType.APPLICATION_JSON));
+                        } catch (IOException e) {
+                            log.warn("[traceId={}] content 事件发送失败，客户端可能已断开", traceId, e);
+                            sendError(emitter, traceId, e.getMessage(), "sse-send");
+                            Disposable current = subscriptionRef.get();
+                            if (current != null) { current.dispose(); }
+                            emitter.completeWithError(e);
+                        }
+                    }
+                    if (delta.reasoning != null) {
+                        try {
+                            emitter.send(SseEmitter.event()
+                                    .name("reasoning")
+                                    .data(Map.of("reasoning", delta.reasoning), MediaType.APPLICATION_JSON));
+                        } catch (IOException e) {
+                            log.warn("[traceId={}] reasoning 事件发送失败", traceId, e);
+                            sendError(emitter, traceId, e.getMessage(), "sse-send");
+                            Disposable current = subscriptionRef.get();
+                            if (current != null) { current.dispose(); }
+                            emitter.completeWithError(e);
+                        }
                     }
                 },
                 e -> {
                     log.error("[traceId={}] 上游 LLM 流式调用失败", traceId, e);
+                    sendError(emitter, traceId, e.getMessage(), "llm-stream");
                     emitter.completeWithError(e);
                 },
                 () -> {
                     completedNormally.set(true);
                     log.info("[traceId={}] 阶段=生成 耗时={}ms 总耗时={}ms",
                             traceId, System.currentTimeMillis() - genStart, System.currentTimeMillis() - start);
-                    // 回答结束后生成追问推荐，事件下发后再关闭连接；失败直接关闭不影响主流程
+                    // done 事件：带 usage 信息
+                    try {
+                        emitter.send(SseEmitter.event()
+                                .name("done")
+                                .data(Map.of("usage", usageRef.get() != null ? usageRef.get() : Map.of()),
+                                        MediaType.APPLICATION_JSON));
+                    } catch (Exception ex) {
+                        log.warn("[traceId={}] done 事件发送失败", traceId, ex);
+                    }
+                    // 回答结束后生成追问推荐，事件下发后再关闭连接
                     if (enableRecommend && answerBuf.length() > 0) {
                         try {
                             List<String> questions = recommendedQuestionService.recommend(question, answerBuf.toString());
@@ -260,15 +291,19 @@ public class ChatService {
         });
     }
 
-    /** 闸门拦截：按上游同款 OpenAI SSE 协议吐一条固定文本后收尾，前端无需感知闸门。 */
+    /** 闸门拦截：发 event: content + event: done，业务层面的"正常拒答"，不是 error。 */
     private void refuse(SseEmitter emitter, String traceId) {
         try {
-            emitter.send(Map.of("choices", List.of(
-                    Map.of("delta", Map.of("content", REFUSAL)))));
-            emitter.send("[DONE]");
+            emitter.send(SseEmitter.event()
+                    .name("content")
+                    .data(Map.of("content", REFUSAL), MediaType.APPLICATION_JSON));
+            emitter.send(SseEmitter.event()
+                    .name("done")
+                    .data(Map.of("usage", Map.of()), MediaType.APPLICATION_JSON));
             emitter.complete();
         } catch (IOException e) {
             log.warn("[traceId={}] 拒答消息发送失败，客户端可能已断开", traceId, e);
+            sendError(emitter, traceId, e.getMessage(), "refuse");
             emitter.completeWithError(e);
         }
     }
@@ -360,6 +395,122 @@ public class ChatService {
             return null;
         }
     }
+
+    /** 从流式 chunk（{"choices":[{"delta":{"content":"xxx"}}]}) 提取 content / reasoning_content。 */
+    private StreamDelta extractStreamDelta(String chunk) {
+        if (chunk == null || chunk.isBlank() || "[DONE]".equals(chunk.trim())) {
+            return null;
+        }
+        try {
+            int deltaIdx = chunk.indexOf("\"delta\"");
+            if (deltaIdx < 0) {
+                return null;
+            }
+            int contentStart = chunk.indexOf("\"content\":\"", deltaIdx);
+            String content = null;
+            if (contentStart > 0) {
+                content = extractJsonString(chunk, contentStart + "\"content\":\"".length());
+            }
+            int reasoningStart = chunk.indexOf("\"reasoning_content\":\"", deltaIdx);
+            String reasoning = null;
+            if (reasoningStart > 0) {
+                reasoning = extractJsonString(chunk, reasoningStart + "\"reasoning_content\":\"".length());
+            }
+            if (content == null && reasoning == null) {
+                return null;
+            }
+            return new StreamDelta(content, reasoning);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 从 JSON 字符串指定偏移处提取字符串值，处理转义。 */
+    private String extractJsonString(String json, int start) {
+        if (start >= json.length()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        int i = start;
+        while (i < json.length()) {
+            char c = json.charAt(i);
+            if (c == '"') {
+                break;
+            }
+            if (c == '\\' && i + 1 < json.length()) {
+                char next = json.charAt(i + 1);
+                switch (next) {
+                    case 'n': sb.append('\n'); break;
+                    case 'r': sb.append('\r'); break;
+                    case 't': sb.append('\t'); break;
+                    case '"': sb.append('"'); break;
+                    case '\\': sb.append('\\'); break;
+                    default: sb.append(next);
+                }
+                i += 2;
+            } else {
+                sb.append(c);
+                i++;
+            }
+        }
+        return sb.toString();
+    }
+
+    /** 从 usage-only chunk 提取 usage 字段，done 事件里带给前端。 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseUsage(String chunk) {
+        try {
+            int usageIdx = chunk.indexOf("\"usage\"");
+            if (usageIdx < 0) return Map.of();
+            int braceStart = chunk.indexOf('{', usageIdx);
+            if (braceStart < 0) return Map.of();
+            int depth = 0;
+            int end = braceStart;
+            for (; end < chunk.length(); end++) {
+                char c = chunk.charAt(end);
+                if (c == '{') depth++;
+                else if (c == '}') {
+                    depth--;
+                    if (depth == 0) { end++; break; }
+                }
+            }
+            String usageJson = chunk.substring(braceStart, end);
+            Map<String, Object> result = new java.util.HashMap<>();
+            // 手动提三个常用字段：prompt_tokens / completion_tokens / total_tokens
+            for (String key : new String[]{"prompt_tokens", "completion_tokens", "total_tokens"}) {
+                int keyIdx = usageJson.indexOf("\"" + key + "\"");
+                if (keyIdx > 0) {
+                    int colon = usageJson.indexOf(':', keyIdx);
+                    if (colon > 0) {
+                        int comma = usageJson.indexOf(',', colon);
+                        int rbrace = usageJson.indexOf('}', colon);
+                        int numEnd = (comma > 0 && comma < rbrace) ? comma : rbrace;
+                        String numStr = usageJson.substring(colon + 1, numEnd).trim();
+                        try { result.put(key, Integer.parseInt(numStr)); } catch (NumberFormatException ignored) {}
+                    }
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    /** 向前端下发 error 事件（best-effort，发送失败不再递归报错）。 */
+    private void sendError(SseEmitter emitter, String traceId, String message, String stage) {
+        try {
+            emitter.send(SseEmitter.event()
+                    .name("error")
+                    .data(Map.of("error", message != null ? message : "未知错误",
+                            "stage", stage != null ? stage : "unknown"),
+                            MediaType.APPLICATION_JSON));
+        } catch (IOException ignored) {
+            // error 事件本身发不出就放弃，避免死循环
+        }
+    }
+
+    /** 流式 chunk 解析结果：content 正文增量 + reasoning 推理增量（可能为空）。 */
+    private record StreamDelta(String content, String reasoning) {}
 
     /** 从非流式 LLM 响应中提取 message.content。 */
     private String extractContent(String response) {

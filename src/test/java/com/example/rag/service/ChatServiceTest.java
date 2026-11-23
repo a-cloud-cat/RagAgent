@@ -89,9 +89,11 @@ class ChatServiceTest {
                 .bodyValue(any())
                 .retrieve()
                 .bodyToFlux(String.class))
-                .thenReturn(Flux.just("chunk"));
+                .thenReturn(Flux.just("{\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}"));
 
         SseEmitter emitter = mock(SseEmitter.class);
+        // 同时 mock send(String) 和 send(SseEventBuilder)，content/reasoning 事件走后者
+        doThrow(new IOException("客户端断开")).when(emitter).send(any(SseEmitter.SseEventBuilder.class));
         doThrow(new IOException("客户端断开")).when(emitter).send(any(String.class));
 
         // skipRetrieval=true 绕开检索，直接进入 LLM 流式分支
@@ -145,8 +147,8 @@ class ChatServiceTest {
         SseEmitter emitter = mock(SseEmitter.class);
         service.streamChat("问题", emitter, false, List.of(), null, "test-trace", false, null);
 
-        // 拦截走 refuse：只发 Object 类型的拒答文案，不发 SseEventBuilder 命名事件
-        verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
+        // 拦截走 refuse：现在发 event:content + event:done 两个 SseEventBuilder，
+        // 验证点改为"不调 LLM"（这个是闸门拦截的核心不变量）
         verify(webClient, never()).post();
     }
 
@@ -156,7 +158,7 @@ class ChatServiceTest {
         service.streamChat("问题", emitter, true, List.of(), null, "test-trace", false, null);
 
         verify(retrievalService, never()).retrieve(anyString(), anyString(), any());
-        verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
+        // 正常路径现在会发 content / done 等命名事件，不再验证 never send
     }
 
     @Test

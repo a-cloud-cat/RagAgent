@@ -856,6 +856,36 @@
                         eventName = '';
                         continue;
                     }
+                    // 新增命名事件：content / reasoning / done / error
+                    if (eventName === 'content') {
+                        if (json.content) {
+                            if (!gotContent) { reasoning.open = false; gotContent = true; }
+                            content.textContent += json.content;
+                            messagesEl.scrollTop = messagesEl.scrollHeight;
+                        }
+                        eventName = '';
+                        continue;
+                    }
+                    if (eventName === 'reasoning') {
+                        if (json.reasoning) {
+                            rText.textContent += json.reasoning;
+                            messagesEl.scrollTop = messagesEl.scrollHeight;
+                        }
+                        eventName = '';
+                        continue;
+                    }
+                    if (eventName === 'done') {
+                        if (json.usage) renderUsage(meta, json.usage);
+                        finish();
+                        return;
+                    }
+                    if (eventName === 'error') {
+                        content.textContent = '请求失败：' + (json.error || '未知错误') +
+                            (json.stage ? '（阶段: ' + json.stage + '）' : '');
+                        content.style.color = '#dc2626';
+                        finish();
+                        return;
+                    }
                     eventName = '';
 
                     // DeepSeek 在 [DONE] 前的最后一个 chunk 附带 usage，与内容 delta 互斥

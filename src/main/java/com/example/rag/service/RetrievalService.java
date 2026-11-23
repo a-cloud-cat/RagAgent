@@ -67,9 +67,15 @@ public class RetrievalService {
         float[] queryVector = embeddingClient.embed(List.of(query)).get(0);
         log.info("[traceId={}] 阶段=向量化 耗时={}ms", traceId, System.currentTimeMillis() - t0);
 
-        // 2. 向量召回（取 candidateLimit 条，可选知识库过滤）
+        // 2. 向量召回（取 candidateLimit 条，可选知识库过滤；失败降级为空列表，让 BM25 独路或 Rerank 兜底）
         long t1 = System.currentTimeMillis();
-        List<Chunk> vectorCandidates = chunkRepository.search(queryVector, candidateLimit, knowledgeBaseId);
+        List<Chunk> vectorCandidates;
+        try {
+            vectorCandidates = chunkRepository.search(queryVector, candidateLimit, knowledgeBaseId);
+        } catch (Exception e) {
+            log.warn("[traceId={}] 向量召回失败，降级为空列表: {}", traceId, e.getMessage());
+            vectorCandidates = List.of();
+        }
         log.info("[traceId={}] 阶段=向量召回 耗时={}ms 候选数={} knowledgeBaseId={}", traceId, System.currentTimeMillis() - t1, vectorCandidates.size(), knowledgeBaseId);
 
         // 3. BM25 关键词召回（可选，与向量召回互补）

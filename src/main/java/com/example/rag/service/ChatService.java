@@ -19,6 +19,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.example.rag.config.LlmProperties;
 import com.example.rag.model.Chunk;
 import com.example.rag.service.intent.Intent;
+import com.example.rag.service.intent.IntentResult;
 import com.example.rag.service.intent.IntentRouter;
 import com.example.rag.tool.CategoryTool;
 import com.example.rag.tool.OrderTool;
@@ -106,19 +107,23 @@ public class ChatService {
                            boolean enableRecommend, Long knowledgeBaseId) {
         long start = System.currentTimeMillis();
 
-        // —— 意图识别：Pattern 匹配，决定走哪条路由 ——
-        Intent intent = intentRouter.classify(question);
-        log.info("[traceId={}] 意图识别结果: {}", traceId, intent);
+        // —— 意图识别：三路门控（Pattern → Embedding → LLM），决定走哪条路由 ——
+        IntentResult intentResult = intentRouter.classify(question);
+        Intent intent = intentResult.intent();
+        log.info("[traceId={}] 意图识别结果: {} (confidence={}, matchedBy={})",
+                traceId, intent, String.format("%.2f", intentResult.confidence()), intentResult.matchedBy());
         switch (intent) {
             case ORDER_QUERY -> {
-                String orderNo = extractOrderNo(question);
+                String orderNo = intentResult.entity("orderNo");
                 sendToolResult(emitter, traceId, orderNo == null
                         ? "请提供订单编号，格式如 20241027001"
                         : orderTool.queryOrder(orderNo), "order");
                 return;
             }
             case STOCK_QUERY -> {
-                sendToolResult(emitter, traceId, stockTool.queryStock(extractProductId(question)), "stock");
+                String pidStr = intentResult.entity("productId");
+                Long productId = pidStr != null ? Long.parseLong(pidStr) : null;
+                sendToolResult(emitter, traceId, stockTool.queryStock(productId), "stock");
                 return;
             }
             case CATEGORY_QUERY -> {
@@ -378,27 +383,6 @@ public class ChatService {
             sendError(emitter, traceId, e.getMessage(), "tool-" + toolName);
             emitter.completeWithError(e);
         }
-    }
-
-    /** 从问题文本中提取订单号（10~20 位连续数字）。 */
-    private String extractOrderNo(String question) {
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\d{10,20}").matcher(question);
-        return m.find() ? m.group() : null;
-    }
-
-    /** 从问题文本中提取商品 ID（先找"商品"后的数字，再兜底任意正整数）。 */
-    private Long extractProductId(String question) {
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("商品[^0-9]*?(\\d+)").matcher(question);
-        if (m.find()) {
-            return Long.parseLong(m.group(1));
-        }
-        // 兜底：第一个出现的正整数
-        m = java.util.regex.Pattern.compile("\\b(\\d+)\\b").matcher(question);
-        if (m.find()) {
-            long id = Long.parseLong(m.group(1));
-            return id > 0 && id < 100000 ? id : null;
-        }
-        return null;
     }
 
     /** 把召回分块转成前端可展示的来源条目，index 与 buildContext 的编号保持一致。 */

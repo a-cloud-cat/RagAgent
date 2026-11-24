@@ -28,7 +28,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.example.rag.config.LlmProperties;
-import com.example.rag.service.intent.Intent;
+import com.example.rag.service.intent.IntentResult;
 import com.example.rag.service.intent.IntentRouter;
 import com.example.rag.tool.CategoryTool;
 import com.example.rag.tool.OrderTool;
@@ -91,7 +91,7 @@ class ChatServiceTest {
         recommendedQuestionService = mock(RecommendedQuestionService.class);
         // 意图识别默认走 RAG_QUERY，既有测试行为不变
         intentRouter = mock(IntentRouter.class);
-        when(intentRouter.classify(anyString())).thenReturn(Intent.RAG_QUERY);
+        when(intentRouter.classify(anyString())).thenReturn(IntentResult.fallback());
         orderTool = mock(OrderTool.class);
         stockTool = mock(StockTool.class);
         categoryTool = mock(CategoryTool.class);

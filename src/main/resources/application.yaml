@@ -15,6 +15,14 @@ spring:
     password: "123456"
     driver-class-name: org.postgresql.Driver
 
+# —— cloudMall 业务库（MySQL，只读查询，不影响主数据源自动配置）——
+cloudmall:
+  datasource:
+    url: jdbc:mysql://localhost:3306/mall?useSSL=false&serverTimezone=Asia/Shanghai
+    username: root
+    password: "123456"
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
 # —— 向量化模型（阿里云百炼，两个环境共用，key 从环境变量注入）——
 # 设置（PowerShell，只需执行一次）：setx DASHSCOPE_API_KEY "你的百炼key"
 rag:

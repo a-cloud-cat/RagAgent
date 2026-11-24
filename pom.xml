@@ -43,6 +43,11 @@
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
         </dependency>
+        <!-- MySQL 驱动：cloudMall 业务库只读查询（Tool 层调用） -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+        </dependency>
 
         <!-- 接口文档：springdoc-openapi（Swagger UI），启动后访问 /swagger-ui.html -->
         <dependency>

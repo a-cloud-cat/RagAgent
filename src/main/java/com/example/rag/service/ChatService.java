@@ -18,6 +18,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.example.rag.config.LlmProperties;
 import com.example.rag.model.Chunk;
+import com.example.rag.service.intent.Intent;
+import com.example.rag.service.intent.IntentRouter;
+import com.example.rag.tool.CategoryTool;
+import com.example.rag.tool.OrderTool;
+import com.example.rag.tool.StockTool;
 
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
@@ -68,22 +73,71 @@ public class ChatService {
 
     private final RecommendedQuestionService recommendedQuestionService;
 
+    private final IntentRouter intentRouter;
+
+    private final OrderTool orderTool;
+
+    private final StockTool stockTool;
+
+    private final CategoryTool categoryTool;
+
     public ChatService(WebClient webClient,
                        LlmProperties llmProperties,
                        RetrievalService retrievalService,
                        QueryRewriteService queryRewriteService,
-                       RecommendedQuestionService recommendedQuestionService) {
+                       RecommendedQuestionService recommendedQuestionService,
+                       IntentRouter intentRouter,
+                       OrderTool orderTool,
+                       StockTool stockTool,
+                       CategoryTool categoryTool) {
         this.webClient = webClient;
         this.llmProperties = llmProperties;
         this.retrievalService = retrievalService;
         this.queryRewriteService = queryRewriteService;
         this.recommendedQuestionService = recommendedQuestionService;
+        this.intentRouter = intentRouter;
+        this.orderTool = orderTool;
+        this.stockTool = stockTool;
+        this.categoryTool = categoryTool;
     }
 
     public void streamChat(String question, SseEmitter emitter, boolean skipRetrieval,
                            List<Map<String, String>> history, String summary, String traceId,
                            boolean enableRecommend, Long knowledgeBaseId) {
         long start = System.currentTimeMillis();
+
+        // —— 意图识别：Pattern 匹配，决定走哪条路由 ——
+        Intent intent = intentRouter.classify(question);
+        log.info("[traceId={}] 意图识别结果: {}", traceId, intent);
+        switch (intent) {
+            case ORDER_QUERY -> {
+                String orderNo = extractOrderNo(question);
+                sendToolResult(emitter, traceId, orderNo == null
+                        ? "请提供订单编号，格式如 20241027001"
+                        : orderTool.queryOrder(orderNo), "order");
+                return;
+            }
+            case STOCK_QUERY -> {
+                sendToolResult(emitter, traceId, stockTool.queryStock(extractProductId(question)), "stock");
+                return;
+            }
+            case CATEGORY_QUERY -> {
+                sendToolResult(emitter, traceId, categoryTool.listCategories(), "category");
+                return;
+            }
+            case REFUSE -> {
+                refuse(emitter, traceId);
+                return;
+            }
+            case CHITCHAT -> {
+                // 闲聊：跳过检索，直接 LLM（skipRetrieval=true）
+                skipRetrieval = true;
+            }
+            case RAG_QUERY -> {
+                // 正常走下面的检索链路，什么都不做
+            }
+        }
+
         List<Chunk> retrieved = List.of();
         RetrievalOutcome outcome = null;
 
@@ -306,6 +360,45 @@ public class ChatService {
             sendError(emitter, traceId, e.getMessage(), "refuse");
             emitter.completeWithError(e);
         }
+    }
+
+    /** Tool 查询结果直接发给前端，不经过 LLM。格式和正常对话一致：content + done。 */
+    private void sendToolResult(SseEmitter emitter, String traceId, String result, String toolName) {
+        try {
+            String toolHeader = "【" + toolName + "查询结果】\n";
+            emitter.send(SseEmitter.event()
+                    .name("content")
+                    .data(Map.of("content", toolHeader + result), MediaType.APPLICATION_JSON));
+            emitter.send(SseEmitter.event()
+                    .name("done")
+                    .data(Map.of("usage", Map.of(), "tool", toolName), MediaType.APPLICATION_JSON));
+            emitter.complete();
+        } catch (IOException e) {
+            log.warn("[traceId={}] Tool 结果发送失败 tool={}", traceId, toolName, e);
+            sendError(emitter, traceId, e.getMessage(), "tool-" + toolName);
+            emitter.completeWithError(e);
+        }
+    }
+
+    /** 从问题文本中提取订单号（10~20 位连续数字）。 */
+    private String extractOrderNo(String question) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\d{10,20}").matcher(question);
+        return m.find() ? m.group() : null;
+    }
+
+    /** 从问题文本中提取商品 ID（先找"商品"后的数字，再兜底任意正整数）。 */
+    private Long extractProductId(String question) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("商品[^0-9]*?(\\d+)").matcher(question);
+        if (m.find()) {
+            return Long.parseLong(m.group(1));
+        }
+        // 兜底：第一个出现的正整数
+        m = java.util.regex.Pattern.compile("\\b(\\d+)\\b").matcher(question);
+        if (m.find()) {
+            long id = Long.parseLong(m.group(1));
+            return id > 0 && id < 100000 ? id : null;
+        }
+        return null;
     }
 
     /** 把召回分块转成前端可展示的来源条目，index 与 buildContext 的编号保持一致。 */

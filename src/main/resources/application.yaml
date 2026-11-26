@@ -42,3 +42,10 @@ rag:
     model: qwen3-rerank
     base-url: https://dashscope.aliyuncs.com
     api-key: ${DASHSCOPE_API_KEY:}
+
+  # —— 记忆系统（工作记忆按会话落库，上下文由服务端按预算装配）——
+  memory:
+    recent-turns: 8             # 上下文最多注入的对话轮数
+    max-context-chars: 3000     # 上下文字符预算，超出丢弃更早的消息
+    summary-trigger-messages: 16 # 未摘要消息超过该条数触发压缩
+    summary-keep-turns: 4       # 压缩时保留最近几轮原文

@@ -55,3 +55,34 @@ CREATE TABLE IF NOT EXISTS t_feedback (
 );
 COMMENT ON TABLE t_feedback IS '对话反馈表';
 COMMENT ON COLUMN t_feedback.feedback IS '反馈类型 UP(赞)/DOWN(踩)';
+
+-- 6) 会话表（记忆系统的锚点：一切工作记忆按会话隔离）
+CREATE TABLE IF NOT EXISTS t_chat_session (
+    id                BIGSERIAL PRIMARY KEY,
+    session_key       VARCHAR(64)  NOT NULL UNIQUE,  -- 前端持有的会话标识（UUID）
+    user_id           VARCHAR(64)  NOT NULL,         -- 匿名用户标识（UUID），将来接登录可替换为真实用户 ID
+    title             VARCHAR(255),                  -- 会话标题（取首条问题，便于会话列表展示）
+    summary           TEXT,                          -- 服务端生成的早期对话摘要
+    summary_last_id   BIGINT       NOT NULL DEFAULT 0, -- 摘要已覆盖到的最后一条消息 ID，之后的消息仍以原文注入
+    create_time       TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    update_time       TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    last_active_time  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_chat_session_user ON t_chat_session (user_id, last_active_time DESC);
+COMMENT ON TABLE t_chat_session IS '会话表';
+COMMENT ON COLUMN t_chat_session.session_key IS '前端持有的会话标识 UUID';
+COMMENT ON COLUMN t_chat_session.summary_last_id IS '摘要覆盖到的最后一条消息 ID，大于该 ID 的消息仍以原文注入';
+
+-- 7) 会话消息表（工作记忆的持久层，也是将来微调语料的原始来源）
+CREATE TABLE IF NOT EXISTS t_chat_message (
+    id          BIGSERIAL PRIMARY KEY,
+    session_id  BIGINT      NOT NULL REFERENCES t_chat_session(id),
+    role        VARCHAR(16) NOT NULL,  -- 仅 user / assistant，服务端写入前做白名单校验
+    content     TEXT        NOT NULL,
+    sources     JSONB,                 -- assistant 消息引用的分块列表，用于前端还原引用标注
+    create_time TIMESTAMP   DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_chat_message_session ON t_chat_message (session_id, id);
+COMMENT ON TABLE t_chat_message IS '会话消息表';
+COMMENT ON COLUMN t_chat_message.role IS '消息角色，仅允许 user/assistant';
+COMMENT ON COLUMN t_chat_message.sources IS '回答引用的分块 JSON，user 消息为空';

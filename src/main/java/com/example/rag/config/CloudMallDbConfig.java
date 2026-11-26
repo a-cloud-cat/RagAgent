@@ -4,6 +4,7 @@ import javax.sql.DataSource;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -39,7 +40,8 @@ public class CloudMallDbConfig {
 
     @Bean(name = "cloudMallJdbcTemplate")
     @ConditionalOnProperty(name = "cloudmall.datasource.url")
-    public JdbcTemplate cloudMallJdbcTemplate(DataSource cloudMallDataSource) {
+    public JdbcTemplate cloudMallJdbcTemplate(
+            @Qualifier("cloudMallDataSource") DataSource cloudMallDataSource) {
         return new JdbcTemplate(cloudMallDataSource);
     }
 }

@@ -86,3 +86,24 @@ CREATE INDEX IF NOT EXISTS idx_chat_message_session ON t_chat_message (session_i
 COMMENT ON TABLE t_chat_message IS '会话消息表';
 COMMENT ON COLUMN t_chat_message.role IS '消息角色，仅允许 user/assistant';
 COMMENT ON COLUMN t_chat_message.sources IS '回答引用的分块 JSON，user 消息为空';
+
+-- 8) LLM 调用台账（成本度量 + 微调语料还原）
+CREATE TABLE IF NOT EXISTS t_llm_call (
+    id                BIGSERIAL PRIMARY KEY,
+    session_id        BIGINT,               -- 可空：无会话的调用（如评测）
+    trace_id          VARCHAR(32),
+    purpose           VARCHAR(32) NOT NULL, -- chat / summary / rewrite / recommend / intent
+    model             VARCHAR(64),
+    prompt_tokens     INT,
+    completion_tokens INT,
+    total_tokens      INT,
+    latency_ms        INT,
+    success           BOOLEAN      NOT NULL DEFAULT TRUE,
+    context_snapshot  JSONB,                -- 实际发给模型的 messages，用于还原训练样本
+    create_time       TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_llm_call_session ON t_llm_call (session_id, create_time DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_call_purpose ON t_llm_call (purpose, create_time DESC);
+COMMENT ON TABLE t_llm_call IS 'LLM 调用台账';
+COMMENT ON COLUMN t_llm_call.purpose IS '调用用途：chat/summary/rewrite/recommend/intent';
+COMMENT ON COLUMN t_llm_call.context_snapshot IS '实际发给模型的 messages 快照，用于还原微调样本';

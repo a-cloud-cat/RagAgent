@@ -397,6 +397,20 @@
     // 当前进行中请求的取消句柄，空闲为 null；供终止按钮跨事件访问
     let currentAbort = null;
 
+    // 匿名用户标识：首次访问生成并持久化，用于会话归属校验
+    const userId = (() => {
+        let id = localStorage.getItem('rag-user-id');
+        if (!id) {
+            id = (window.crypto && crypto.randomUUID)
+                ? crypto.randomUUID()
+                : 'u-' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+            localStorage.setItem('rag-user-id', id);
+        }
+        return id;
+    })();
+    // 会话标识：首轮为空，后端通过 event:session 下发后持久化，刷新页面仍可续接上下文
+    let sessionId = localStorage.getItem('rag-session-id') || '';
+
     // 设置面板：追问推荐开关，偏好存 localStorage
     const settingsBtn = document.getElementById('settings-btn');
     const settingsPanel = document.getElementById('settings-panel');
@@ -704,29 +718,6 @@
         runTurn(question, null);
     }
 
-    // 收集 userWrap 之前所有已完成轮次为 history，不含当前问题
-    function collectHistory(userWrap) {
-        const history = [];
-        let node = messagesEl.firstElementChild;
-        while (node && node !== userWrap) {
-            if (node.classList.contains('msg')) {
-                if (node.classList.contains('user')) {
-                    const bubble = node.querySelector('.bubble');
-                    if (bubble) history.push({ role: 'user', content: bubble.textContent });
-                } else if (node.classList.contains('ai')) {
-                    const answer = node.querySelector('.bubble > .answer');
-                    if (answer) {
-                        // 去掉用户主动终止留下的标记，避免污染上下文
-                        const text = answer.textContent.replace(/（已停止）$/, '').trim();
-                        if (text) history.push({ role: 'assistant', content: text });
-                    }
-                }
-            }
-            node = node.nextElementSibling;
-        }
-        return history;
-    }
-
     // 一个问答回合：新建、重新发送、修改共用。userWrap 决定回答气泡插在哪
     async function runTurn(question, userWrap) {
         if (busy) return;
@@ -752,8 +743,10 @@
             userWrap = addUserMessage(question).wrap;
             inputEl.value = '';
         } else {
-            // 编辑/重发改变了历史上下文，旧摘要失效
-            localStorage.removeItem('chat-summary');
+            // 编辑/重发会改变该轮之后的历史，服务端已存消息与当前 UI 不一致，
+            // 开启新会话从当前问题重新记起，避免上下文错位
+            sessionId = '';
+            localStorage.removeItem('rag-session-id');
         }
         // 多轮记忆下，编辑/重发会改变该轮回答，后续轮次依赖失效，整段截断
         let next = userWrap.nextElementSibling;
@@ -790,12 +783,10 @@
         bubble.appendChild(meta);
 
         try {
-            const history = collectHistory(userWrap);
-            const summary = localStorage.getItem('chat-summary') || '';
             const resp = await fetch('/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question, skipRetrieval, history, summary, enableRecommend: recommendToggle.checked, knowledgeBaseId: kbSelect.value ? Number(kbSelect.value) : null }),
+                body: JSON.stringify({ question, sessionId, userId, skipRetrieval, enableRecommend: recommendToggle.checked, knowledgeBaseId: kbSelect.value ? Number(kbSelect.value) : null }),
                 signal: abortController.signal
             });
             if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
@@ -846,8 +837,12 @@
                         eventName = '';
                         continue;
                     }
-                    if (eventName === 'summary') {
-                        if (json.summary) localStorage.setItem('chat-summary', json.summary);
+                    if (eventName === 'session') {
+                        // 新会话首次请求时下发，持久化后后续请求带回，上下文由服务端维护
+                        if (json.sessionId) {
+                            sessionId = json.sessionId;
+                            localStorage.setItem('rag-session-id', sessionId);
+                        }
                         eventName = '';
                         continue;
                     }

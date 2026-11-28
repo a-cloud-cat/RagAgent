@@ -1,19 +1,17 @@
 package com.example.rag.controller;
 
-import java.util.List;
-import java.util.Map;
-
 public class ChatRequest {
+
     private String question;
+
+    // 会话标识：首次请求留空，服务端新建会话并通过 event:session 下发；后续请求原样带回
+    private String sessionId;
+
+    // 匿名用户标识（前端 localStorage 生成），用于会话归属校验
+    private String userId;
 
     // 知识库健康检查失败、用户显式确认后由前端置 true，后端据此跳过检索
     private boolean skipRetrieval;
-
-    // 当前问题之前的对话历史，[{role, content}]，不含当前 question
-    private List<Map<String, String>> history;
-
-    // 早期对话的摘要，由前端从 localStorage 传入；无则为 null
-    private String summary;
 
     // 是否开启回答后的追问推荐，前端设置面板控制，默认开启
     private boolean enableRecommend = true;
@@ -29,28 +27,28 @@ public class ChatRequest {
         this.question = question;
     }
 
+    public String getSessionId() {
+        return sessionId;
+    }
+
+    public void setSessionId(String sessionId) {
+        this.sessionId = sessionId;
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+
+    public void setUserId(String userId) {
+        this.userId = userId;
+    }
+
     public boolean isSkipRetrieval() {
         return skipRetrieval;
     }
 
     public void setSkipRetrieval(boolean skipRetrieval) {
         this.skipRetrieval = skipRetrieval;
-    }
-
-    public List<Map<String, String>> getHistory() {
-        return history;
-    }
-
-    public void setHistory(List<Map<String, String>> history) {
-        this.history = history;
-    }
-
-    public String getSummary() {
-        return summary;
-    }
-
-    public void setSummary(String summary) {
-        this.summary = summary;
     }
 
     public boolean isEnableRecommend() {
